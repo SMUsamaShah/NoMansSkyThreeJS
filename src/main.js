@@ -661,6 +661,25 @@ function updateLabels() {
         key: i,
       });
     }
+    // the system's station (labelled only when near enough to matter)
+    const st = universe.system.station;
+    if (st) {
+      _v.copy(st.posUniv).sub(nav.pos);
+      const dist = _v.length();
+      _v2.set(0, 0, -1).applyQuaternion(nav.quat);
+      if (dist > st.radius * 4 && dist < 8e6 && _v.dot(_v2) > 0) {
+        _v3.copy(st.posUniv).sub(nav.pos).multiplyScalar(1 / dist);
+        _v.copy(_v3).multiplyScalar(100).applyMatrix4(camera.matrixWorldInverse);
+        _v.applyMatrix4(camera.projectionMatrix);
+        if (Math.abs(_v.x) <= 1.05 && Math.abs(_v.y) <= 1.05) {
+          labelItems.push({
+            x: (_v.x * 0.5 + 0.5) * window.innerWidth,
+            y: (-_v.y * 0.5 + 0.5) * window.innerHeight - 20,
+            name: st.name, sub: 'station', dim: dist > 2e6, key: -1,
+          });
+        }
+      }
+    }
   }
   ui.updateLabels(labelItems);
 }
@@ -718,6 +737,10 @@ function frame() {
   for (const p of universe.planets()) {
     _v.copy(nav.pos).sub(p.posUniv);
     p.update(_v, dt, p === nearest, FREEZE ? 0 : dt);
+  }
+  if (universe.system.station) universe.system.station.update(FREEZE ? 0 : dt);
+  if (universe.fadingSystem && universe.fadingSystem.station) {
+    universe.fadingSystem.station.update(FREEZE ? 0 : dt);
   }
   if (nearest) {
     _v.copy(nav.pos).sub(nearest.posUniv);
@@ -856,6 +879,26 @@ window.NMS = {
     focusPlanet = p; spaceCtl.focus = p;
     ui.setTarget(p, nav.pos.distanceTo(p.posUniv));
     return true;
+  },
+  // park beside the system's space station, sun over the shoulder
+  stationVista(k = 3.2) {
+    const st = universe.system.station;
+    if (!st) return false;
+    tweens.length = 0;
+    if (walkCtl.active) walkCtl.exit();
+    setState('space');
+    const sunDir = _v3.copy(universe.system.star.pos).sub(st.posUniv).normalize();
+    _v.copy(sunDir).multiplyScalar(0.8)
+      .add(_v2.set(0, 1, 0).cross(sunDir).normalize().multiplyScalar(0.6))
+      .normalize();
+    nav.pos.copy(st.posUniv).addScaledVector(_v, st.radius * k);
+    nav.vel.set(0, 0, 0);
+    lookQuatAt(nav.pos, st.posUniv, nav.quat);
+    return true;
+  },
+  station() {
+    const st = universe.system.station;
+    return st ? { name: st.name, topology: st.topology, radius: Math.round(st.radius) } : null;
   },
   // hover low over a sunlit stretch of coastline, facing out to sea —
   // the water-depth-gradient showcase (a scenic dir is often inland)

@@ -229,5 +229,42 @@ for (const type of Object.keys(TYPES)) {
   p.dispose();
 }
 
+// ---- space stations: seeded, deterministic, genuinely varied ---------------
+{
+  const { makeStation } = await import('../src/station.js');
+  const tris = (st) => {
+    let t = 0;
+    st.group.traverse((o) => { if (o.geometry) t += o.geometry.index.count / 3; });
+    return t;
+  };
+  const sig = (st) => {
+    let s = 0;
+    st.group.traverse((o) => {
+      if (o.geometry) {
+        const a = o.geometry.attributes.position.array;
+        for (let i = 0; i < a.length; i += 97) s = (s + a[i] * (i + 1)) % 1e9;
+      }
+    });
+    return s;
+  };
+  const seen = new Set();
+  let minTris = Infinity, maxTris = 0;
+  for (let i = 0; i < 8; i++) {
+    const a = makeStation('SANITY:st:' + i, 'S' + i);
+    const b = makeStation('SANITY:st:' + i, 'S' + i);
+    check(tris(a) === tris(b) && Math.abs(sig(a) - sig(b)) < 1e-6,
+      `station ${i}: not deterministic`);
+    check(tris(a) > 2000, `station ${i}: suspiciously simple (${tris(a)} tris)`);
+    check(tris(a) < 60000, `station ${i}: too heavy (${tris(a)} tris)`);
+    check(a.radius > 150 && a.radius < 2500, `station ${i}: odd radius ${a.radius}`);
+    a.update(0.5);        // must not throw, with or without a rotor
+    seen.add(a.topology);
+    minTris = Math.min(minTris, tris(a)); maxTris = Math.max(maxTris, tris(a));
+    a.dispose(); b.dispose();
+  }
+  check(seen.size >= 3, `stations lack variety (topologies: ${[...seen].join(',')})`);
+  console.log(`\nstations: 8 seeds → topologies [${[...seen].join(' ')}], ${minTris}–${maxTris} tris`);
+}
+
 console.log(failures ? `\nSANITY: ${failures} failure(s)` : '\nSANITY: all good');
 process.exit(failures ? 1 : 0);

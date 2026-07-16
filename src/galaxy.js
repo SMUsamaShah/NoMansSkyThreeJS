@@ -7,7 +7,8 @@ import * as THREE from 'three';
 import { makeRng, strHash32, hash3i, hashFloat } from './rng.js';
 import { clamp } from './noise.js';
 import { Planet, TYPES } from './planet.js';
-import { systemName, planetName, moonName } from './names.js';
+import { systemName, planetName, moonName, makeWord } from './names.js';
+import { makeStation } from './station.js';
 
 export const CELL = 6e7;               // metres between star lattice cells
 const STAR_PROB = 0.42;
@@ -381,6 +382,7 @@ export class Universe {
     for (const p of sys.planets) {
       p.group.position.copy(p.posUniv).sub(camPos);
     }
+    if (sys.station) sys.station.group.position.copy(sys.station.posUniv).sub(camPos);
   }
 
   updateRelative(camPos) {
@@ -525,6 +527,23 @@ export class StarSystem {
       }
     }
 
+    // --- the space station: one per system, seeded, no two alike ---
+    // parked off the first planet's sunlit shoulder so arrivals fly past it
+    {
+      const spec = this._specs[0];
+      const pR = 30000 + makeRng(spec.seed)() * 90000;   // planet's first draw
+      this.station = makeStation(universe.seed + ':st:' + star.id,
+        makeWord(rand).replace(/^./, (c) => c.toUpperCase()) + ' Station');
+      const toSun = _v.copy(star.pos).sub(spec.pos).normalize();
+      const side = _v2.set(0, 1, 0).cross(toSun);
+      if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+      side.normalize();
+      this.station.posUniv.copy(spec.pos)
+        .addScaledVector(toSun, pR * 2.6)
+        .addScaledVector(side, pR * 1.2);
+      universe.group.add(this.station.group);
+    }
+
     // a deferred system materializes one planet per call (mid-warp); a normal
     // one is complete on construction
     this._buildIdx = 0;
@@ -568,6 +587,10 @@ export class StarSystem {
     for (const p of this.planets) {
       this.universe.group.remove(p.group);
       p.dispose();
+    }
+    if (this.station) {
+      this.universe.group.remove(this.station.group);
+      this.station.dispose();
     }
     this.universe.group.remove(this.sunGroup, this.sunLight);
     this.sunMesh.geometry.dispose();
