@@ -10,6 +10,7 @@ import { flushChunkQueue, pendingChunks, setGridCells, lodStats, lodStatsReset, 
 import { SpaceControls, WalkControls, keys } from './controls.js';
 import { Scatter } from './scatter.js';
 import { FarFlora } from './farflora.js';
+import { Ambience } from './audio.js';
 import { WarpStreaks, SkyDome, Ship } from './effects.js';
 import { tickShaders } from './shaders.js';
 import { EffectComposer } from '../vendor/jsm/postprocessing/EffectComposer.js';
@@ -157,6 +158,8 @@ const scatter = new Scatter();
 // far tier: proxy trees to the horizon (?farflora=0 spares SwiftShader tests)
 const FARFLORA = qs.get('farflora') !== '0';
 const farFlora = new FarFlora();
+// synthesized ambience (?audio=0 disables; starts on first gesture; M mutes)
+const ambientAudio = new Ambience(qs.get('audio') !== '0');
 const warpStreaks = new WarpStreaks(scene);
 const skyDome = new SkyDome(scene);
 const ship = new Ship(scene);
@@ -235,6 +238,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') takeoff();
   if (e.code === 'KeyH') document.body.classList.toggle('hide-hud');   // photo mode
   if (e.code === 'KeyB') usePost = !usePost;                           // bloom toggle
+  if (e.code === 'KeyM') ambientAudio.toggleMute();
   if (e.code === 'Escape' && state === 'flyto') {
     tweens.length = 0;
     setState('space');
@@ -751,6 +755,11 @@ function frame() {
   }
 
   ambience();
+  ambientAudio.update(dt, {
+    inAtmo: envInAtmo, day: envDay, underwater: envUnderwater,
+    alt: nearestAlt, speed: _velActual.length(),
+    type: nearest ? nearest.type : null, state,
+  });
 
   // land prompt
   const canLand = state === 'space' && nearest && nearestAlt < 420 && nav.vel.length() < 4000;
@@ -900,6 +909,8 @@ window.NMS = {
     const st = universe.system.station;
     return st ? { name: st.name, topology: st.topology, radius: Math.round(st.radius) } : null;
   },
+  audioStart() { ambientAudio.start(); return ambientAudio.started; },
+  audioState() { return ambientAudio.state(); },
   // hover low over a sunlit stretch of coastline, facing out to sea —
   // the water-depth-gradient showcase (a scenic dir is often inland)
   coast(i, alt = 1400) {
