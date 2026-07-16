@@ -153,7 +153,7 @@ Recreate the *experience* of No Man's Sky in the browser with three.js:
 - Commit and push in small increments (the remote container can revert the
   working tree without warning; origin is the source of truth).
 
-## 5. Status snapshot (v0.20.0, 2026-07-10)
+## 5. Status snapshot (v0.21.0, 2026-07-16)
 
 Done and verified:
 - Seeded universe, systems, warp/manual travel, land/walk/dive/takeoff.
@@ -163,14 +163,20 @@ Done and verified:
   near scatter bubble + far proxy tier to ~4.5 km + canopy-tinted terrain to
   orbit; meadow landing bias for demos.
 - Sky dome fixed (its shader had never compiled); de-halofied nebulae/band.
+- Procedural space stations (§2.6): one per system, seeded — ring/spine/
+  cross/cluster topologies, HDR window bands, blinking beacons, rotating
+  sections; HUD label; `NMS.stationVista()` for screenshots.
+- Biome ambience (§2.7): fully synthesized — space hum, wind, leaf rustle +
+  chirps, dry wind, ice shimmer + creaks, lava rumble + crackle, alien
+  murmur + bubbles, underwater muffle; starts on gesture, M mutes,
+  `?audio=0` for tests; graph verified by `tools/_audio_probe.mjs`.
 - Touch controls; desktop controls; quality-low path.
 
 Pending / next (in owner's priority order):
-1. Procedural space stations (§2.6).
-2. Biome-specific audio (§2.7).
-3. Perceived-seamlessness polish on terrain detail resolve (§2.2).
-4. GTAO tuning for log-depth, then consider default-on (§2.3).
-5. three.js upgrade / WebGPU evaluation (§4).
+1. Perceived-seamlessness polish on terrain detail resolve (§2.2).
+2. Station interiors / docking (not yet requested — confirm scope first).
+3. GTAO tuning for log-depth, then consider default-on (§2.3).
+4. three.js upgrade / WebGPU evaluation (§4).
 
 Known cosmetic issues (logged, not blocking): faint parallel streaks over
 horizon suns; moon landings can spawn in dense forest; ice plains featureless
