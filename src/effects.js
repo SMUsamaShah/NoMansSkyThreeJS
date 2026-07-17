@@ -170,12 +170,74 @@ const _sf = new THREE.Vector3();
 const _su = new THREE.Vector3();
 const _sr = new THREE.Vector3();
 
+// plated hull texture: panel seams, rivet rows, mottled tone shifts, faint
+// streaks and access hatches — the difference between a toy and a machine.
+// Doubles as bump (red channel: seams indent) and roughness variation.
+function shipHullTexture() {
+  let s = 1234;                              // fixed seed: same hull every boot
+  const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#d8dbe0';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 70; i++) {             // mottle: subtly different panels
+    ctx.fillStyle = `rgba(${100 + rnd() * 80 | 0},${105 + rnd() * 80 | 0},${115 + rnd() * 80 | 0},0.07)`;
+    ctx.fillRect(rnd() * size, rnd() * size, 40 + rnd() * 120, 25 + rnd() * 80);
+  }
+  ctx.strokeStyle = 'rgba(40,45,55,0.34)';   // panel seams
+  ctx.lineWidth = 1.2;
+  for (let x = 0; x < size; x += 22 + rnd() * 26) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + (rnd() - 0.5) * 8, size); ctx.stroke();
+  }
+  for (let y = 0; y < size; y += 40 + rnd() * 46) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size, y + (rnd() - 0.5) * 6); ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(35,40,50,0.30)';     // rivet rows along the seams
+  for (let i = 0; i < 900; i++) ctx.fillRect(rnd() * size, rnd() * size, 1.6, 1.6);
+  for (let i = 0; i < 26; i++) {             // weathering streaks
+    const x = rnd() * size, y = rnd() * size;
+    const grd = ctx.createLinearGradient(x, y, x, y + 30 + rnd() * 60);
+    grd.addColorStop(0, 'rgba(30,32,38,0.13)');
+    grd.addColorStop(1, 'rgba(30,32,38,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(x, y, 1.5 + rnd() * 2.5, 30 + rnd() * 60);
+  }
+  for (let i = 0; i < 14; i++) {             // access hatches
+    const x = rnd() * size, y = rnd() * size, w = 10 + rnd() * 16, h = 8 + rnd() * 12;
+    ctx.fillStyle = 'rgba(50,55,65,0.22)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(230,235,240,0.25)';
+    ctx.strokeRect(x, y, w, h);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
+}
+
 export class Ship {
   constructor(scene) {
     const g = new THREE.Group();
-    const hull = new THREE.MeshStandardMaterial({ color: 0xc9ced8, metalness: 0.6, roughness: 0.38 });
-    const accent = new THREE.MeshStandardMaterial({ color: 0xb8452a, metalness: 0.4, roughness: 0.5 });
-    const canopy = new THREE.MeshStandardMaterial({ color: 0x16242e, metalness: 0.3, roughness: 0.12 });
+    const hullTex = shipHullTexture();
+    this.hullTex = hullTex;
+    // brushed, not chromed: flat wing panels at full metalness mirror-flash
+    // the HDR sun into a white blowout
+    const hull = new THREE.MeshStandardMaterial({
+      color: 0xd4d9e2, metalness: 0.62, roughness: 0.58,
+      map: hullTex, bumpMap: hullTex, bumpScale: 1.6, roughnessMap: hullTex,
+    });
+    const dark = new THREE.MeshStandardMaterial({
+      color: 0x2b3038, metalness: 0.7, roughness: 0.5, map: hullTex, bumpMap: hullTex, bumpScale: 1.2,
+    });
+    const accent = new THREE.MeshStandardMaterial({
+      color: 0xc2512d, metalness: 0.5, roughness: 0.45, map: hullTex, bumpMap: hullTex, bumpScale: 1.2,
+    });
+    const canopy = new THREE.MeshPhysicalMaterial({
+      color: 0x0d1a24, metalness: 0.1, roughness: 0.06,
+      clearcoat: 1.0, clearcoatRoughness: 0.08,
+    });
     const engineGlowMat = new THREE.MeshStandardMaterial({
       color: 0x143040, emissive: new THREE.Color(0x66ddff), emissiveIntensity: 2.2,
     });
@@ -189,24 +251,89 @@ export class Ship {
       return m;
     };
 
-    // fuselage points down -Z (three.js forward)
-    add(new THREE.CylinderGeometry(0.5, 1.05, 6.6, 8), hull, 0, 0, 0.4, -Math.PI / 2);
-    add(new THREE.ConeGeometry(0.5, 2.6, 8), hull, 0, 0, -3.6, -Math.PI / 2);
-    add(new THREE.SphereGeometry(0.62, 14, 10), canopy, 0, 0.55, -1.4, 0, 0, 0, 1, 0.62, 1.5);
-    // swept wings with a touch of dihedral
-    add(new THREE.BoxGeometry(4.2, 0.12, 1.9), hull, 2.6, -0.1, 1.5, 0, 0.32, 0.07);
-    add(new THREE.BoxGeometry(4.2, 0.12, 1.9), hull, -2.6, -0.1, 1.5, 0, -0.32, -0.07);
-    add(new THREE.BoxGeometry(0.12, 1.5, 1.6), accent, 0, 0.85, 3.0, 0.18);
-    // wingtip accents
-    add(new THREE.BoxGeometry(0.5, 0.3, 1.6), accent, 4.45, 0.05, 2.2, 0, 0.32, 0);
-    add(new THREE.BoxGeometry(0.5, 0.3, 1.6), accent, -4.45, 0.05, 2.2, 0, -0.32, 0);
-    // engines + glow
-    add(new THREE.CylinderGeometry(0.42, 0.5, 1.7, 8), hull, 1.15, -0.2, 3.1, -Math.PI / 2);
-    add(new THREE.CylinderGeometry(0.42, 0.5, 1.7, 8), hull, -1.15, -0.2, 3.1, -Math.PI / 2);
-    this.glowA = add(new THREE.CylinderGeometry(0.3, 0.36, 0.3, 8), engineGlowMat, 1.15, -0.2, 4.0, -Math.PI / 2);
-    this.glowB = add(new THREE.CylinderGeometry(0.3, 0.36, 0.3, 8), engineGlowMat, -1.15, -0.2, 4.0, -Math.PI / 2);
+    // fuselage: a lofted body, not a cylinder — nose at -Z
+    {
+      const prof = [
+        [0.001, 0], [0.1, 0.05], [0.26, 0.5], [0.42, 1.2], [0.55, 2.1],
+        [0.64, 3.1], [0.66, 4.0], [0.6, 5.0], [0.48, 5.9], [0.3, 6.6],
+        [0.18, 7.0], [0.001, 7.15],
+      ].map(([r, y]) => new THREE.Vector2(r, y));
+      const body = new THREE.LatheGeometry(prof, 18);
+      body.rotateX(-Math.PI / 2);            // +Y (nose end) → -Z? no: → +Z
+      body.rotateY(Math.PI);                 // flip so the taper faces forward
+      body.translate(0, 0, 3.55);            // nose ≈ -3.6, tail ≈ +3.55
+      body.scale(1, 0.82, 1);                // squashed cross-section
+      add(body, hull, 0, 0, 0);
+    }
+    // spine hump fairing behind the canopy
+    add(new THREE.SphereGeometry(0.5, 12, 9), hull, 0, 0.3, 0.7, 0, 0, 0, 1, 0.62, 2.6);
+    // glass canopy + dark frame sill
+    add(new THREE.SphereGeometry(0.52, 16, 12), canopy, 0, 0.42, -1.35, 0, 0, 0, 0.86, 0.6, 1.65);
+    add(new THREE.SphereGeometry(0.54, 12, 8), dark, 0, 0.34, -1.35, 0, 0, 0, 0.9, 0.34, 1.72);
 
-    g.traverse((m) => { m.castShadow = true; });
+    // wings: swept, tapered, extruded with a real edge — not flat boxes
+    const wing = (sign) => {
+      // shape in (x=span, y→z chord after the fold): root LE forward,
+      // tip swept 1.7 m back with a 45% taper
+      const sh = new THREE.Shape();
+      sh.moveTo(0.4, -1.3);
+      sh.lineTo(sign * 3.9, 0.4);
+      sh.lineTo(sign * 3.9, 1.35);
+      sh.lineTo(0.4, 1.05);
+      sh.closePath();
+      const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.13, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.06, bevelSegments: 1 });
+      geo.rotateX(Math.PI / 2);              // planform flat in XZ, thickness in Y
+      geo.translate(0, 0.02, 2.0);
+      return geo;
+    };
+    add(wing(1), hull, 0, -0.12, 0, 0, 0, 0.05);
+    add(wing(-1), hull, 0, -0.12, 0, 0, 0, -0.05);
+    // wingtip endplates + accent tips
+    for (const e of [1, -1]) {
+      add(new THREE.BoxGeometry(0.09, 0.55, 1.15), dark, e * 3.86, 0.1, 2.42, 0.1 * e);
+      add(new THREE.BoxGeometry(0.5, 0.16, 1.0), accent, e * 3.55, -0.02, 2.35);
+    }
+    // tail fin, swept, with accent trim
+    {
+      const sh = new THREE.Shape();
+      sh.moveTo(-0.2, 0); sh.lineTo(1.6, 0.9); sh.lineTo(1.6, 1.45); sh.lineTo(0.25, 0.6); sh.closePath();
+      const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.08, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1 });
+      geo.rotateY(-Math.PI / 2);             // upright, thickness across X
+      add(geo, hull, 0, 0.28, 1.6);
+      add(new THREE.BoxGeometry(0.1, 0.5, 0.5), accent, 0, 1.55, 3.15, 0.5);
+    }
+    // racing stripes along the flanks
+    for (const e of [1, -1]) {
+      add(new THREE.BoxGeometry(0.03, 0.24, 4.6), accent, e * 0.58, 0.06, 0.6, 0, e * 0.02, 0);
+    }
+    // engine nacelles: lathed, with dark intake lips and inner nozzles
+    for (const e of [1, -1]) {
+      const prof = [
+        [0.30, 0], [0.44, 0.15], [0.48, 0.55], [0.44, 1.25], [0.5, 1.55], [0.34, 1.95],
+      ].map(([r, y]) => new THREE.Vector2(r, y));
+      const nac = new THREE.LatheGeometry(prof, 14);
+      nac.rotateX(Math.PI / 2);              // axis → Z, intake forward
+      add(nac, hull, e * 1.12, -0.16, 2.15);
+      const lip = new THREE.TorusGeometry(0.37, 0.06, 6, 14);
+      add(lip, dark, e * 1.12, -0.16, 2.12);
+      const nozzle = new THREE.CylinderGeometry(0.3, 0.34, 0.5, 12, 1, true);
+      add(nozzle, dark, e * 1.12, -0.16, 3.95, -Math.PI / 2);
+    }
+    this.glowA = add(new THREE.CylinderGeometry(0.24, 0.3, 0.3, 10), engineGlowMat, 1.12, -0.16, 4.05, -Math.PI / 2);
+    this.glowB = add(new THREE.CylinderGeometry(0.24, 0.3, 0.3, 10), engineGlowMat, -1.12, -0.16, 4.05, -Math.PI / 2);
+    // greebles: nose sensors, dorsal antenna, belly skids
+    add(new THREE.CylinderGeometry(0.025, 0.025, 1.0, 5), dark, 0.16, -0.08, -3.7, Math.PI / 2);
+    add(new THREE.CylinderGeometry(0.025, 0.025, 0.7, 5), dark, -0.16, -0.08, -3.55, Math.PI / 2);
+    add(new THREE.CylinderGeometry(0.015, 0.03, 0.75, 4), dark, 0, 0.62, 2.3);
+    for (const e of [1, -1]) add(new THREE.BoxGeometry(0.26, 0.16, 2.0), dark, e * 0.62, -0.62, 0.7);
+    // navigation lights: port red, starboard green, both blink in update()
+    this.navMatL = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+    this.navMatR = new THREE.MeshBasicMaterial({ color: 0x22ff44 });
+    add(new THREE.SphereGeometry(0.07, 6, 5), this.navMatL, -3.88, 0.12, 2.0);
+    add(new THREE.SphereGeometry(0.07, 6, 5), this.navMatR, 3.88, 0.12, 2.0);
+    this.navT = 0;
+
+    g.traverse((m) => { m.castShadow = true; m.receiveShadow = true; });
     this.group = g;
     scene.add(g);
 
@@ -256,6 +383,12 @@ export class Ship {
     const stretch = 1 + Math.min(8, speed / 4e5 + warp * 7) * burnK;
     this.glowA.scale.set(1, stretch, 1);
     this.glowB.scale.set(1, stretch, 1);
+
+    // aviation strobes: sharp asynchronous double-flash
+    this.navT += dt;
+    const bl = (t) => Math.pow(Math.max(0, Math.sin(t)), 24) * 2.2 + 0.12;
+    this.navMatL.color.setRGB(bl(this.navT * 3.4), 0.02, 0.02);
+    this.navMatR.color.setRGB(0.02, bl(this.navT * 3.4 + 2.1), 0.03);
   }
 }
 const _sq2 = new THREE.Quaternion();
