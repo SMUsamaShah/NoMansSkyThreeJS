@@ -39,12 +39,19 @@ function mergeGeos(list) {
   }
   const pos = new Float32Array(vTotal * 3);
   const col = new Float32Array(vTotal * 3);
+  const uv = new Float32Array(vTotal * 2);
   const idx = new Uint32Array(iTotal);
   let vo = 0, io = 0;
   for (const g of list) {
     pos.set(g.attributes.position.array, vo * 3);
     col.set(g.attributes.color.array, vo * 3);
     const n = g.attributes.position.count;
+    // hull plating scales with the piece: a 700 m torus and a 3 m greeble
+    // should carry similar-sized panels, so scale each piece's UVs by size
+    g.computeBoundingSphere();
+    const k = Math.max(0.5, g.boundingSphere.radius / 7);
+    const gu = g.attributes.uv.array;
+    for (let i = 0; i < gu.length; i++) uv[vo * 2 + i] = gu[i] * k;
     if (g.index) {
       const gi = g.index.array;
       for (let i = 0; i < gi.length; i++) idx[io + i] = gi[i] + vo;
@@ -59,9 +66,58 @@ function mergeGeos(list) {
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   out.setIndex(new THREE.BufferAttribute(idx, 1));
   out.computeVertexNormals();
   return out;
+}
+
+// industrial hull plating, tiling: panel cells in shifted tones, dark seams,
+// rivet corners, vent slats, conduit runs, the odd hazard stripe. Doubles as
+// the bump map (seams indent). Node-safe caller: guarded by `document`.
+function stationHullTexture(rng) {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#c9ccd2';
+  ctx.fillRect(0, 0, size, size);
+  const cell = 28;
+  for (let y = 0; y < size; y += cell) {
+    for (let x = 0; x < size; x += cell) {
+      const v = 190 + (rng() * 26 - 13) | 0;
+      ctx.fillStyle = `rgb(${v},${v + 2},${v + 6})`;
+      ctx.fillRect(x, y, cell, cell);
+      if (rng() < 0.08) {                    // vent slats
+        ctx.fillStyle = 'rgba(40,44,52,0.55)';
+        for (let i = 0; i < 4; i++) ctx.fillRect(x + 5, y + 6 + i * 5, cell - 10, 2);
+      } else if (rng() < 0.03) {             // hazard chevrons
+        ctx.fillStyle = 'rgba(190,150,30,0.8)';
+        ctx.fillRect(x + 3, y + cell - 8, cell - 6, 5);
+        ctx.fillStyle = 'rgba(30,30,30,0.8)';
+        for (let i = 0; i < 3; i++) ctx.fillRect(x + 5 + i * 8, y + cell - 8, 4, 5);
+      }
+    }
+  }
+  ctx.strokeStyle = 'rgba(45,50,60,0.5)';    // seams
+  ctx.lineWidth = 1.5;
+  for (let p = 0; p <= size; p += cell) {
+    ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(35,40,50,0.5)';      // rivets at panel corners
+  for (let y = 0; y <= size; y += cell) {
+    for (let x = 0; x <= size; x += cell) ctx.fillRect(x - 1, y - 1, 2.4, 2.4);
+  }
+  for (let i = 0; i < 5; i++) {              // conduit runs
+    const y = rng() * size;
+    ctx.fillStyle = 'rgba(60,66,78,0.6)';
+    ctx.fillRect(0, y, size, 2.5);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
 }
 
 // a strut between two points
@@ -310,8 +366,11 @@ export function makeStation(seed, name) {
   // a random tilt so no two stations sit on the same axis
   body.quaternion.setFromEuler(new THREE.Euler((rng() - 0.5) * 0.7, rng() * Math.PI * 2, (rng() - 0.5) * 0.7));
 
+  // plated hull texture (browser only — node sanity builds geometry blind)
+  const hullTex = typeof document === 'undefined' ? null : stationHullTexture(makeRng(seed + ':tex'));
   const hullMat = new THREE.MeshStandardMaterial({
-    vertexColors: true, metalness: 0.45, roughness: 0.5, flatShading: true,
+    vertexColors: true, metalness: 0.45, roughness: 0.55, flatShading: true,
+    map: hullTex, bumpMap: hullTex, bumpScale: 2.2,
   });
   hullMat.emissive.setScalar(0.03);
   const winMat = new THREE.MeshBasicMaterial({ vertexColors: true });
@@ -359,6 +418,7 @@ export function makeStation(seed, name) {
     },
     dispose() {
       for (const m of meshes) m.geometry.dispose();
+      if (hullTex) hullTex.dispose();
       hullMat.dispose();
       winMat.dispose();
       beaconMat.dispose();
