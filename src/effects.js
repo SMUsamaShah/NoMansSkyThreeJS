@@ -222,10 +222,11 @@ export class Ship {
     const g = new THREE.Group();
     const hullTex = shipHullTexture();
     this.hullTex = hullTex;
-    // brushed, not chromed: flat wing panels at full metalness mirror-flash
-    // the HDR sun into a white blowout
+    // titanium, not white paint: under the HDR sun a near-white flat panel
+    // exceeds the bloom threshold and the whole wing flashes — a darker
+    // hull keeps full sunlight below it while the plating stays readable
     const hull = new THREE.MeshStandardMaterial({
-      color: 0xd4d9e2, metalness: 0.62, roughness: 0.58,
+      color: 0x9aa1ac, metalness: 0.58, roughness: 0.62,
       map: hullTex, bumpMap: hullTex, bumpScale: 1.6, roughnessMap: hullTex,
     });
     const dark = new THREE.MeshStandardMaterial({

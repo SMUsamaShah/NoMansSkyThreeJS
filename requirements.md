@@ -97,14 +97,26 @@ Recreate the *experience* of No Man's Sky in the browser with three.js:
   cluster grammars), emissive windows/lights that bloom can pick up, visible
   from space near a planet. No two alike.
 
-### 2.7 Biome-specific audio — PENDING
-- Owner approved this idea. Synthesized WebAudio (no audio assets): per-biome
-  surface ambience (wind through leaves on lush, dry wind on desert, bubbling
-  on toxic, crystalline shimmer on ice, rumble near lava), space hum, muffled
-  underwater. Respect autoplay policies (start on first gesture); mutable;
-  disable-able for tests (`?audio=0`).
+### 2.7 Biome-specific audio — built, but OFF by default
+- Owner approved the idea, then judged the v0.21 synthesized mix "horrible —
+  it was better when there was no sound." Standing rule: **ambience ships
+  disabled** (`?audio=1` or the M key opts in) until it genuinely sounds
+  good. Raw oscillators/noise won't cut it — the bar is: would you leave it
+  on? Prefer fewer, softer, well-filtered layers (convolution/reverb, real
+  envelopes) over more layers. Respect autoplay policies; M mutes.
 
-### 2.8 Controls & platforms
+### 2.8 The ship
+- Owner: the original blocky ship "looks like a toy" — the ship must read as
+  a real spacecraft. Lofted fuselage (not primitive cylinders), glass canopy,
+  swept tapered wings with thickness, engine nacelles with visible nozzles,
+  plated hull texturing (seams/rivets/streaks as map+bump+roughness),
+  navigation strobes. Materials brushed, not chromed — flat panels must not
+  mirror-flash the HDR sun into bloom blowouts.
+- Stations carry the same bar: untextured hulls are "ugly" (owner) — plating
+  with panel seams, vents, hazard markings, at consistent panel scale across
+  pieces of very different sizes.
+
+### 2.9 Controls & platforms
 - Desktop: WASD walking, mouse look, scroll fly, click-to-travel, L to land,
   T to take off, jump.
 - Touch/mobile: fully playable — drag look, pinch fly, tap-to-travel, virtual
@@ -120,7 +132,14 @@ Recreate the *experience* of No Man's Sky in the browser with three.js:
    If it reads wrong, it is wrong.
 3. **Worlds must feel alive and varied** — lushness, color, atmosphere.
    "Bare-bones demo" is the failure mode to avoid.
-4. Honest reporting: if something is only partially achieved, say so plainly
+4. **The fidelity north star is Star Citizen's planet look** (owner's
+   benchmark). Within the no-assets/procedural constraint, chase it with:
+   detail octaves at every scale (micro grain → mid-scale patchiness →
+   continental swathes), micro-relief normal work, material response
+   (roughness variation, specular life at low sun), aerial perspective,
+   and surface texturing on every artificial object. Removing a feature is
+   acceptable when it can't yet meet the bar (see audio).
+5. Honest reporting: if something is only partially achieved, say so plainly
    (the owner notices overclaiming).
 
 ## 4. Engineering constraints & practices
