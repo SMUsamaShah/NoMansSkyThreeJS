@@ -158,8 +158,10 @@ const scatter = new Scatter();
 // far tier: proxy trees to the horizon (?farflora=0 spares SwiftShader tests)
 const FARFLORA = qs.get('farflora') !== '0';
 const farFlora = new FarFlora();
-// synthesized ambience (?audio=0 disables; starts on first gesture; M mutes)
-const ambientAudio = new Ambience(qs.get('audio') !== '0');
+// synthesized ambience — OFF by default until it clears the quality bar
+// (owner judged v0.21's mix worse than silence). ?audio=1 or the M key
+// opts in; M then toggles mute.
+const ambientAudio = new Ambience(qs.get('audio') === '1');
 const warpStreaks = new WarpStreaks(scene);
 const skyDome = new SkyDome(scene);
 const ship = new Ship(scene);
@@ -238,7 +240,10 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') takeoff();
   if (e.code === 'KeyH') document.body.classList.toggle('hide-hud');   // photo mode
   if (e.code === 'KeyB') usePost = !usePost;                           // bloom toggle
-  if (e.code === 'KeyM') ambientAudio.toggleMute();
+  if (e.code === 'KeyM') {
+    if (!ambientAudio.started) { ambientAudio.enabled = true; ambientAudio.start(); }
+    else ambientAudio.toggleMute();
+  }
   if (e.code === 'Escape' && state === 'flyto') {
     tweens.length = 0;
     setState('space');

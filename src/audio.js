@@ -36,7 +36,7 @@ export class Ambience {
     ctx.resume();
 
     this.master = ctx.createGain();
-    this.master.gain.value = 0.55;
+    this.master.gain.value = 0.38;
     // one filter muffles the whole world underwater
     this.duck = ctx.createBiquadFilter();
     this.duck.type = 'lowpass';
@@ -76,7 +76,7 @@ export class Ambience {
     this.leaves = noise('highpass', 2400);    // rustle: AM'd below
     this.dry = noise('bandpass', 240, 1.2);
     this.rumble = noise('lowpass', 95);
-    this.murmur = noise('bandpass', 130, 6);  // alien resonant murmur
+    this.murmur = noise('bandpass', 130, 2.5);  // alien resonant murmur
     this.shimmer = [2350, 3140, 3920].map((f) => tone(f));
 
     // slow LFOs make the beds breathe (gusts, rustle waves)
@@ -103,7 +103,7 @@ export class Ambience {
   toggleMute() {
     if (!this.started) return false;
     this.muted = !this.muted;
-    this.master.gain.setTargetAtTime(this.muted ? 0 : 0.55, this.ctx.currentTime, 0.1);
+    this.master.gain.setTargetAtTime(this.muted ? 0 : 0.38, this.ctx.currentTime, 0.1);
     return this.muted;
   }
 
@@ -119,7 +119,7 @@ export class Ambience {
     this._to(this.space2, 0.022 * (1 - env.inAtmo));
     const speedK = Math.min(1, env.speed / 260);
     this._to(this.wind, env.inAtmo * (0.02 + surface * 0.05 + speedK * 0.12), 0.3);
-    this._to(this.leaves, this.family === 'lush' ? surface * 0.028 * (0.4 + 0.6 * env.day) : 0);
+    this._to(this.leaves, this.family === 'lush' ? surface * 0.018 * (0.4 + 0.6 * env.day) : 0);
     this._to(this.dry, this.family === 'dry' ? surface * 0.05 : 0);
     this._to(this.rumble, this.family === 'lava' ? surface * 0.09 : 0);
     this._to(this.murmur, this.family === 'weird' ? surface * 0.045 : 0);
@@ -131,7 +131,7 @@ export class Ambience {
     // ---- one-shot events, Poisson-spaced ----
     this._nextEvent -= dt;
     if (this._nextEvent <= 0 && surface > 0.5) {
-      this._nextEvent = 1.5 + Math.random() * 7;
+      this._nextEvent = 3 + Math.random() * 9;
       const f = this.family;
       if (env.underwater) this._bubble(140 + Math.random() * 120, 0.09);
       else if (f === 'lush' && env.day > 0.35) this._chirp();
@@ -154,7 +154,7 @@ export class Ambience {
       o.frequency.exponentialRampToValueAtTime(f0 * 0.7, t + 0.3);
     }
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.05 + Math.random() * 0.03, t + 0.02);
+    g.gain.linearRampToValueAtTime(0.028 + Math.random() * 0.018, t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
     o.connect(g).connect(this.master);
     o.start(t); o.stop(t + 0.36);

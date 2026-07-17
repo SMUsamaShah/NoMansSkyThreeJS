@@ -12,7 +12,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 const errors = [];
 page.on('pageerror', (e) => { errors.push(String(e)); console.error('PAGEERROR:', String(e).split('\n')[0]); });
-await page.goto(`http://127.0.0.1:${port}/?seed=EUCLID&nolock=1&buildms=60&vclouds=0&post=0`);
+await page.goto(`http://127.0.0.1:${port}/?seed=EUCLID&nolock=1&buildms=60&vclouds=0&post=0&audio=1`);
 await page.waitForFunction('window.NMS && window.NMS.booted', null, { timeout: 90000 });
 
 let failed = 0;
