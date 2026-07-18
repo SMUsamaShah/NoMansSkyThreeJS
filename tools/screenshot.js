@@ -141,7 +141,12 @@ try {
   console.error('manual approach failed:', String(e).split('\n')[0]);
 }
 
-console.log(errors.length ? `DONE WITH ${errors.length} PAGE ERROR(S)` : 'DONE — no page errors');
+// shader compile failures never throw page errors, but they blank whole
+// subsystems (a reserved word once erased the terrain) — treat as failure
+const shaderFails = await page.evaluate('NMS.stats().shaderFails');
+if (shaderFails > 0) errors.push(`${shaderFails} shader program(s) failed to compile`);
+
+console.log(errors.length ? `DONE WITH ${errors.length} ERROR(S)` : 'DONE — no page errors');
 await browser.close();
 server.close();
 process.exit(errors.length ? 1 : 0);

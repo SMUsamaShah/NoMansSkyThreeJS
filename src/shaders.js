@@ -259,14 +259,14 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
           // ---- mid-scale patchiness (~100–500 m): soil and moisture
           // variation seen from a hilltop — the octave between micro grain
           // and continental swathes that uniform game terrain lacks
-          float patch = triDetail(vLocalPos, w, 0.0035, 1)
+          float pch = triDetail(vLocalPos, w, 0.0035, 1)
                       + triDetail(vLocalPos, w, 0.0012, 0) - 1.0;
-          gPatch = patch;
-          diffuseColor.rgb *= 1.0 + patch * (0.30 + 0.20 * vMat.z) * (0.5 + uMacroK);
+          gPatch = pch;
+          diffuseColor.rgb *= 1.0 + pch * (0.30 + 0.20 * vMat.z) * (0.5 + uMacroK);
           // damp hollows darken and cool slightly
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(0.88, 0.97, 0.92),
-            clamp(-patch * 1.8, 0.0, 0.5) * uMacroK);
+            clamp(-pch * 1.8, 0.0, 0.5) * uMacroK);
 
           // ---- per-pixel snowline: crisp caps from orbit
           if (uSnowK > 0.5) {
