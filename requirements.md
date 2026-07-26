@@ -163,6 +163,59 @@ Recreate the *experience* of No Man's Sky in the browser with three.js:
 5. Honest reporting: if something is only partially achieved, say so plainly
    (the owner notices overclaiming).
 
+## 3b. The AAA gap — what "Star Citizen in a browser" actually means
+
+The owner asked: *do you understand what look I want, and how far is the
+current look from it, and why?* This section is the answer, and it is meant to
+be re-derived from real screenshots (`node tools/lookbook.mjs`) rather than
+from memory. Update it as items close.
+
+**The target, stated as a rule.** A frame should look *photographed*, not
+*rendered*: light behaves physically everywhere, the camera is a physical
+instrument with its own flaws, scale is legible through atmosphere, and no
+surface is ever a flat untextured colour. "AAA" is not more polygons — it is
+the absence of tells. Every item below is a tell.
+
+**Diagnosed from actual frames (v0.21, 2026-07-26).** Ranked by how much
+damage each does to the illusion:
+
+1. ~~**Metal is black in space.**~~ FIXED in v0.22. `scene.environment` was
+   never set; a `metalness: 0.58` hull has no diffuse and gets its entire
+   specular from the environment map, so the ship's shadow side was
+   arithmetically zero — the hero object was a black paper cutout in every
+   space frame. See `src/env.js`.
+2. ~~**Nothing casts a contact shadow.**~~ FIXED in v0.22. `shadow.normalBias`
+   was a flat 2.0 m — wider than a whole trunk — so every prop pushed its own
+   shadow off itself, and the shadow box wasted 2048 texels on ±300 m. Trees
+   floated. Box now fits view distance; bias tracks texel size.
+3. ~~**No aerial perspective.**~~ FIXED in v0.22. Fog density was 1e-5 above
+   2.5 km: an 8% wash over a 30 km vista. Mountains 30 km out arrived as
+   saturated as the ground underfoot and the world read diorama-sized. See
+   `src/scattering.js` — sun-dependent Mie lobe, so haze goes warm toward the
+   sun and cool away from it.
+4. ~~**Faceted low-poly canopies.**~~ FIXED in v0.22. Canopies were
+   `IcosahedronGeometry(r, 1)` as triangle soup — flat-shaded 80-tri balls on
+   sticks, the single loudest "tech demo" signal in every surface frame, and
+   exactly what the owner rejected in §2.4. Now indexed, noise-displaced,
+   smooth-shaded, occlusion baked, clustered into a crown.
+5. ~~**No lens.**~~ FIXED in v0.22 (`src/postfx.js`): sun shafts, anamorphic
+   streak, ghosts, vignette, aberration, grain.
+6. **The sun is a featureless white disc.** No limb darkening, no corona
+   structure. It blows to flat white and stays there. OPEN.
+7. **Clouds are flat blobs with visible polygon edges.** A straight seam cuts
+   through the deck at altitude — a plane edge showing through. OPEN.
+8. **Near-field ground is an untextured colour ramp.** The foreground metre of
+   a surface frame — the part closest to the eye — is the emptiest part of the
+   image. OPEN.
+9. **The star field is uniform dots.** Real skies have a steep magnitude
+   distribution, colour by spectral class, and clustering. OPEN.
+10. **The HUD is a web overlay**, not an instrument: rounded rectangles and
+    body text floating over the world. OPEN.
+
+**Standing method.** Look at the game before and after every change
+(`tools/lookbook.mjs` is the stable spread; `tools/harness.mjs` makes new
+probes cheap). Judge the image, not the counter.
+
 ## 4. Engineering constraints & practices
 
 - **Determinism**: generation is a pure function of the seed. Never let placement

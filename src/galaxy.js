@@ -84,6 +84,51 @@ function makeStarPointsMaterial() {
   });
 }
 
+// The photosphere: limb darkening plus a whisper of granulation. Stays an HDR
+// emitter (values well above 1) so bloom still does the blowout and screen-space
+// bloom is still occluded properly by planets — this only changes what the disc
+// looks like once something dims it enough to see.
+function makeSunMaterial(color) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: color },
+      uLimb: { value: 0.42 },
+    },
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vV = -mv.xyz;
+        gl_Position = projectionMatrix * mv;
+        #include <logdepthbuf_vertex>
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      uniform vec3 uColor;
+      uniform float uLimb;
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        #include <logdepthbuf_fragment>
+        float mu = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
+        // the classic linear limb-darkening law, I(mu)/I(1) = 1 - u(1 - mu)
+        float limb = 1.0 - uLimb * (1.0 - mu);
+        // convection granulation: very subtle, and only visible once dimmed
+        float g = sin(vN.x * 47.0) * sin(vN.y * 41.0) * sin(vN.z * 53.0);
+        limb *= 1.0 + g * 0.05;
+        // the edge runs cooler and redder than the core
+        vec3 c = mix(uColor * vec3(1.06, 0.72, 0.42), uColor, smoothstep(0.0, 0.55, mu));
+        gl_FragColor = vec4(c * limb, 1.0);
+      }`,
+    fog: false,
+  });
+}
+
 function glowTexture(size = 128, inner = 0.0, tight = false) {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
@@ -347,10 +392,14 @@ export class StarSystem {
     this.sunGroup = new THREE.Group();
     // HDR disc: values above 1 make bloom do the blowout, and screen-space
     // bloom is properly occluded by planets — no giant sprite to wash them
-    const sunMat = new THREE.MeshBasicMaterial({
-      color: star.color.clone().multiplyScalar(4), fog: false,
-    });
-    this.sunBaseC = sunMat.color.clone();
+    // A star is not a flat disc of one colour. Limb darkening is the strongest
+    // visual signature it has — the centre is far brighter than the edge,
+    // because at the edge you are looking through a slanted path and seeing
+    // higher, cooler gas. Real photographs of any star show it; a uniform disc
+    // reads as a white circle sticker. It matters most exactly when the sun is
+    // dimmed enough to be looked at directly: a low sun at sunset.
+    const sunMat = makeSunMaterial(star.color.clone().multiplyScalar(4));
+    this.sunBaseC = sunMat.uniforms.uColor.value.clone();
     this.sunMesh = new THREE.Mesh(new THREE.SphereGeometry(star.radius, 48, 32), sunMat);
     this.sunGroup.add(this.sunMesh);
     this.sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -462,8 +511,12 @@ export class StarSystem {
   setSunExtinction(x) {
     if (Math.abs(x - this._ext) < 0.004) return;   // colors only change on need
     this._ext = x;
-    this.sunMesh.material.color.copy(this.sunBaseC).multiplyScalar(1 - 0.82 * x)
+    this.sunMesh.material.uniforms.uColor.value.copy(this.sunBaseC)
+      .multiplyScalar(1 - 0.82 * x)
       .lerp(_extC.setRGB(1.35, 0.42, 0.12), x * 0.75);
+    // a sun low in thick air shows its disc — push limb darkening harder so
+    // the edge actually falls off instead of ending on a hard circle
+    this.sunMesh.material.uniforms.uLimb.value = 0.42 + 0.5 * x;
     this.sunGlow.material.color.copy(this.glowBaseC)
       .lerp(_extC.setRGB(1.0, 0.45, 0.18), x * 0.8);
     this.glowExt = 1 - 0.75 * x;

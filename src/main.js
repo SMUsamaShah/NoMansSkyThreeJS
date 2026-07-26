@@ -15,6 +15,8 @@ import { bakeNebula } from './nebula.js';
 import { EnvLighting } from './env.js';
 import { WarpStreaks, SkyDome, Ship, SpaceDust } from './effects.js';
 import { tickShaders } from './shaders.js';
+import { updateAerial } from './scattering.js';
+import { CinematicPass } from './postfx.js';
 import { EffectComposer } from '../vendor/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from '../vendor/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from '../vendor/jsm/postprocessing/UnrealBloomPass.js';
@@ -111,12 +113,19 @@ if (qs.get('gtao') === '1' && !QUALITY_LOW) {
 // specular glints) — daytime sky must NOT veil the terrain
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), IS_TOUCH ? 0.35 : 0.5, 0.4, 1.05);
 composer.addPass(bloomPass);
+// the lens: sun shafts, anamorphic streak, ghosts, vignette, aberration, grain.
+// Runs in HDR linear, before OutputPass tonemaps. ?lens=0 to compare.
+const LENS = qs.get('lens') !== '0' && !QUALITY_LOW;
+const cinematic = new CinematicPass(camera, IS_TOUCH ? { shaft: 0.6, flare: 0.4 } : {});
+cinematic.enabled = LENS;
+composer.addPass(cinematic);
 composer.addPass(new OutputPass());
 let usePost = qs.get('post') !== '0' && !QUALITY_LOW;
 renderer.info.autoReset = false;   // accumulate across composer passes
 function sizePost() {
   composer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH ? 1.7 : 2));
   composer.setSize(window.innerWidth, window.innerHeight);
+  cinematic.setSize(window.innerWidth, window.innerHeight);
 }
 sizePost();
 
@@ -204,6 +213,14 @@ const _horC = new THREE.Color();
 const _cloudCol = new THREE.Color();
 const _envSunDir = new THREE.Vector3(0, 1, 0);
 const _envGround = new THREE.Color();
+const _warmD = new THREE.Color();
+// filled by ambience(), pushed to the shared shader uniforms after the camera
+// is placed (the sun has to be transformed into THIS frame's view space)
+const aerialP = {
+  sunDirWorld: new THREE.Vector3(0, 1, 0),
+  color: new THREE.Color(), sunColor: new THREE.Color(),
+  density: 0, scaleHeight: 1500, camAlt: 0, planetR: 1e7,
+};
 const _warmA = new THREE.Color();
 const _warmB = new THREE.Color();
 const _warmC = new THREE.Color();
@@ -643,6 +660,20 @@ function ambience(dt) {
     _envSunDir.copy(sunDir);
     _envGround.copy(p.pal.land[Math.min(2, p.pal.land.length - 1)].c)
       .multiplyScalar(skyStrength * 0.5);
+
+    // ---- aerial perspective. Inscatter is the sky's own colour (so it already
+    // carries the sunset lerp), with a brighter warm version for the Mie lobe
+    // toward the sun. Underwater the water fog owns the look instead.
+    aerialP.color.copy(_horC).multiplyScalar(skyStrength * 1.1);
+    aerialP.sunColor.copy(_horC).lerp(_warmD.setRGB(1.0, 0.78, 0.5), 0.55)
+      .multiplyScalar(skyStrength * 2.2);
+    aerialP.sunDirWorld.copy(sunDir);
+    aerialP.density = envUnderwater ? 0 : Math.min(inAtmo, 1) * 6.0e-5;
+    // thin planets need a thin slab: scale height tracks the atmosphere shell,
+    // not Earth's 8.5 km (these worlds are 30–90 km across)
+    aerialP.scaleHeight = Math.max(400, p.atmoHeight * 0.45);
+    aerialP.camAlt = Math.max(0, nearestAlt);
+    aerialP.planetR = p.R;
   } else {
     hemi.intensity = 0;
     envSunset = 0;
@@ -652,6 +683,7 @@ function ambience(dt) {
     universe.system.sunDirFrom(nav.pos, _envSunDir);
     _horC.setRGB(0, 0, 0);
     _c2.setRGB(0, 0, 0);
+    aerialP.density = 0;     // vacuum does not scatter
   }
 
   // the environment map that lights every metal surface. Fed the SAME colours
@@ -830,6 +862,16 @@ function frame() {
   camera.position.set(0, 0, 0);
   camera.quaternion.copy(nav.quat);
 
+  // the aerial-perspective uniforms need the sun in THIS frame's view space,
+  // so they are pushed here rather than in ambience() — one frame earlier and
+  // the haze's warm lobe would lag the camera during a fast pan
+  camera.updateMatrixWorld();
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  updateAerial(camera, aerialP);
+  // sunGroup sits at the sun's camera-relative position after updateRelative,
+  // which is exactly what the lens needs to place its shafts and flare
+  cinematic.update(dt, universe.system.sunGroup ? universe.system.sunGroup.position : null);
+
   // sun → shadow-light crossfade (after updateRelative, which sets intensities)
   sunShadow.visible = shadowBlend > 0.02;
   if (sunShadow.visible) {
@@ -839,6 +881,21 @@ function frame() {
       .lerp(_warmC.setRGB(1, 0.45, 0.2), envSunset * 0.55);
     sunShadow.position.copy(sunDirCam).multiplyScalar(4000);
     sunShadow.target.position.set(0, 0, 0);
+
+    // Fit the shadow box to how far you can actually see detail. A fixed
+    // ±300 m box spent 2048 texels on ground you were nowhere near, leaving
+    // 0.29 m/texel — too coarse for a tree to cast anything readable. On foot
+    // this tightens to ~0.05 m/texel and props get real contact shadows.
+    const half = clamp(70 + nearestAlt * 1.4, 70, 900);
+    const sc = sunShadow.shadow.camera;
+    if (Math.abs(sc.right - half) > half * 0.08) {
+      sc.left = sc.bottom = -half;
+      sc.right = sc.top = half;
+      sc.updateProjectionMatrix();
+    }
+    // normalBias must track texel size — it was a flat 2.0 m, wider than a
+    // whole trunk, so every prop shoved its own shadow off itself.
+    sunShadow.shadow.normalBias = (half * 2 / SHADOW_MAP) * 1.7;
     sysLight.intensity *= 1 - shadowBlend;
     if (universe.fadingSystem) universe.fadingSystem.sunLight.intensity *= 1 - shadowBlend;
   }

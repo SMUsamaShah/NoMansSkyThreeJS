@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { hash3i, hashFloat } from './rng.js';
 import { buildFlora } from './flora.js';
+import { chainAerial } from './scattering.js';
 
 const TILE_M = 1024;         // metres per cache tile
 const CELL_M = 32;           // metres per proxy-tree cell (32 per tile edge)
@@ -100,6 +101,7 @@ export class FarFlora {
       });
       mat.emissive.setScalar(0.22);
       applyFarFade(mat, { uCamL: this.uCamL, uAltK: this.uAltK });
+      chainAerial(mat);
       const im = new THREE.InstancedMesh(geo, mat, CAP);
       im.count = 0;
       im.frustumCulled = false;

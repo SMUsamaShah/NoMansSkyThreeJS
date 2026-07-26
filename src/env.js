@@ -151,7 +151,6 @@ export class EnvLighting {
 
     this._cool -= dt;
     if (!this._dirty || this._cool > 0) return;
-    this._cool = 0.25;
     this._dirty = false;
     L.sun.copy(c.sunDir); L.up.copy(c.up); L.atmo = c.atmo;
     this._bake();
@@ -159,6 +158,7 @@ export class EnvLighting {
 
   _bake() {
     const prev = this.rt;
+    const t0 = (typeof performance !== 'undefined' ? performance.now() : 0);
     // bake in linear space no matter what the app's output settings are
     const prevTone = this.renderer.toneMapping;
     this.renderer.toneMapping = THREE.NoToneMapping;
@@ -166,6 +166,12 @@ export class EnvLighting {
     this.renderer.toneMapping = prevTone;
     this.scene.environment = this.rt.texture;
     if (prev) prev.dispose();
+    // Self-tuning cooldown: spend at most ~8% of wall clock on env bakes. A
+    // real GPU takes a millisecond or two and re-bakes several times a second;
+    // a software rasteriser takes hundreds and backs itself off to once every
+    // few seconds instead of bringing the frame rate to its knees.
+    const ms = (typeof performance !== 'undefined' ? performance.now() : 0) - t0;
+    this._cool = Math.min(6, Math.max(0.25, ms * 0.012));
   }
 
   dispose() {

@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { hash3i, hashFloat } from './rng.js';
 import { applyWindSway, GROW } from './shaders.js';
+import { chainAerial } from './scattering.js';
 import { buildFlora } from './flora.js';
 
 // wind strength per prop kind (0 = rigid)
@@ -151,6 +152,7 @@ export class Scatter {
         emissive: colors[kind].clone().multiplyScalar(glow),
       });
       applyWindSway(mat, SWAY[kind] || 0);   // 0 sway still wires the grow scale
+      chainAerial(mat);
       this.addMesh(planet, kind, GEO[kind], mat);
     }
     // this world's own species: geometry seeded by the planet, colours baked
@@ -162,11 +164,15 @@ export class Scatter {
         color: 0xffffff, vertexColors: true, roughness: 0.9,
         // grass carries hand-authored up-normals (field-soft lighting) that
         // flat shading would discard
-        flatShading: kind !== 'grass', side: THREE.DoubleSide,
+        // Only ROCK wants faceting. Flat-shading vegetation discards the
+        // vertex normals the canopies are built with and hands back the
+        // "low-poly demo" look the smooth lobes exist to kill.
+        flatShading: false, side: THREE.DoubleSide,
       });
       mat.emissive.setScalar(FLORA_GLOW[kind]);
       applyWindSway(mat, SWAY[kind] || 0);
       floraEmissive(mat);
+      chainAerial(mat);
       const im = this.addMesh(planet, kind, this.flora[kind], mat);
       if (kind === 'grass') im.castShadow = false;   // invisible; halves its cost
     }

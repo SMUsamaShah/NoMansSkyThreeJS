@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { makeRng } from './rng.js';
+import { Simplex } from './noise.js';
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -88,22 +89,47 @@ function bentTube(rng, pal, h, r0, r1, leanX, leanZ, color, segs = 5, radial = 6
   return { parts, top: prev };
 }
 
-function blob(rng, r, color) {
-  // icosahedra are triangle soup: co-located corners must jitter together
-  // or the surface tears open
-  const g = new THREE.IcosahedronGeometry(r, 1);
+// A mass of foliage, not a polyhedron.
+//
+// This used to be IcosahedronGeometry(r, 1) — triangle soup, so the merge gave
+// it flat normals, and a flat-shaded 80-triangle ball reads as exactly what it
+// is: a faceted lump on a stick. That single primitive was the loudest
+// "low-poly tech demo" signal in every surface frame.
+//
+// Now: an INDEXED sphere (so the merge's computeVertexNormals averages across
+// shared vertices and the surface shades smoothly), pushed around by seeded
+// noise so the silhouette is irregular, with occlusion baked toward the
+// underside and the interior. Vertex count actually drops — indexed 70 vs
+// soup 240 — so this is cheaper than what it replaces.
+function blob(rng, r, color, noise, opts = {}) {
+  const lumps = opts.lumps ?? 1.0;
+  const squash = opts.squash ?? (0.78 + rng() * 0.34);
+  const g = new THREE.SphereGeometry(r, 9, 7);
   const p = g.attributes.position;
-  const seen = new Map();
+  // one offset per lobe: two lobes of the same species never share a shape
+  const ox = rng() * 40, oy = rng() * 40, oz = rng() * 40;
+  const _n = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
-    const key = p.getX(i).toFixed(4) + ',' + p.getY(i).toFixed(4) + ',' + p.getZ(i).toFixed(4);
-    let k = seen.get(key);
-    if (k === undefined) {
-      k = [1 + (rng() - 0.5) * 0.35, 0.8 + rng() * 0.4];
-      seen.set(key, k);
-    }
-    p.setXYZ(i, p.getX(i) * k[0], p.getY(i) * k[1], p.getZ(i) * k[0]);
+    _n.set(p.getX(i), p.getY(i), p.getZ(i));
+    const len = _n.length() || 1e-6;
+    _n.multiplyScalar(1 / len);
+    // Displacement is a pure function of DIRECTION, so the duplicated seam
+    // column and the pole fan all move identically and the surface cannot
+    // tear open — the property the old jitter map had to work to preserve.
+    const d = noise.fbm(_n.x + ox, _n.y + oy, _n.z + oz, 1.35, 3, 0.55, 2.3, 1e9);
+    const k = 1 + d * 0.42 * lumps;
+    p.setXYZ(i, _n.x * r * k, _n.y * r * k * squash, _n.z * r * k);
   }
-  return paint(g, color, rng, 0.12);
+  paint(g, color, rng, 0.1);
+  // baked occlusion: foliage is dark underneath and where it packs together.
+  // Without this a canopy is a uniformly bright blob with no interior.
+  const col = g.attributes.color;
+  for (let i = 0; i < p.count; i++) {
+    const uy = p.getY(i) / (r * squash);
+    const ao = 0.62 + 0.38 * Math.sqrt(Math.max(0, uy * 0.5 + 0.5));
+    col.setXYZ(i, col.getX(i) * ao, col.getY(i) * ao, col.getZ(i) * ao);
+  }
+  return g;
 }
 
 function frond(rng, len, wid, curl, color) {
@@ -124,7 +150,7 @@ function frond(rng, len, wid, curl, color) {
 
 // ---- species builders (origin at base, ~2–6 m tall) ------------------------
 
-function buildTree(rng, pal, canopyColor) {
+function buildTree(rng, pal, canopyColor, noise) {
   const style = ['orbs', 'cap', 'fronds', 'tentacles', 'orbs', 'cap'][(rng() * 6) | 0];
   let h = 3.2 + rng() * 4.2;
   if (rng() < 0.18) h *= 1.6;        // some worlds grow giants
@@ -136,26 +162,58 @@ function buildTree(rng, pal, canopyColor) {
   const top = trunk.top;
 
   if (style === 'orbs') {
-    const n = 3 + (rng() * 3) | 0;
+    // A crown, not a handful of loose balls. One dominant mass sets the
+    // silhouette; smaller lobes ring it at the shoulders to break the outline,
+    // each tinted slightly differently so the canopy has interior depth
+    // instead of reading as one flat-coloured object.
+    const R = h * (0.24 + rng() * 0.12);
+    const _c = new THREE.Color();
+    parts.push(place(blob(rng, R, canopyColor, noise, { lumps: 1.15 }),
+      top.x, top.y + R * 0.35, top.z));
+    const n = 4 + (rng() * 4) | 0;
     for (let i = 0; i < n; i++) {
-      const r = h * (0.16 + rng() * 0.14);
-      parts.push(place(blob(rng, r, canopyColor),
-        top.x + (rng() - 0.5) * h * 0.36,
-        top.y + (rng() - 0.6) * h * 0.22,
-        top.z + (rng() - 0.5) * h * 0.36));
+      const a = (i / n) * Math.PI * 2 + rng() * 0.8;
+      const rr = R * (0.42 + rng() * 0.34);
+      const reach = R * (0.72 + rng() * 0.4);
+      // outer lobes catch more sky, so they sit a touch lighter and cooler
+      _c.copy(canopyColor).offsetHSL((rng() - 0.5) * 0.05, 0, (rng() - 0.35) * 0.09);
+      parts.push(place(blob(rng, rr, _c, noise, { lumps: 1.35 }),
+        top.x + Math.cos(a) * reach,
+        top.y + R * (0.05 + rng() * 0.55),
+        top.z + Math.sin(a) * reach));
     }
   } else if (style === 'cap') {
-    const r = h * (0.3 + rng() * 0.22), ch = r * (0.55 + rng() * 0.4);
-    const cap = new THREE.LatheGeometry([
-      new THREE.Vector2(0.02, 0), new THREE.Vector2(r * 0.9, ch * 0.18),
-      new THREE.Vector2(r, ch * 0.5), new THREE.Vector2(r * 0.5, ch * 0.85),
-      new THREE.Vector2(0.03, ch)], 9);
+    const r = h * (0.3 + rng() * 0.22), ch = r * (0.62 + rng() * 0.45);
+    // A 9-segment lathe is a nonagon: from underneath it read as a flat-topped
+    // umbrella, which is most of why these trees looked like cardboard. More
+    // segments, more profile rows, and a rim that curls back UNDER the cap the
+    // way a real one does — so the silhouette has a lip instead of an edge.
+    const prof = [];
+    const ROWS = 9;
+    for (let i = 0; i <= ROWS; i++) {
+      const t = i / ROWS;
+      // bell: rises steeply, peaks wide at 55% height, tucks under at the rim
+      const rr = Math.sin(Math.pow(t, 0.72) * Math.PI * 0.98);
+      prof.push(new THREE.Vector2(Math.max(0.02, r * rr), ch * t));
+    }
+    // flare the underside lip outward so the rim is not a knife edge
+    prof[1].x = Math.max(prof[1].x, r * 0.62);
+    const cap = new THREE.LatheGeometry(prof, 18);
     paint(cap, canopyColor, rng, 0.1);
+    // darken the shaded underside — a cap lit flat top and bottom reads as a
+    // decal, and the gill side is the part a viewer at eye height actually sees
+    {
+      const cp = cap.attributes.position, cc = cap.attributes.color;
+      for (let i = 0; i < cp.count; i++) {
+        const k = 0.55 + 0.45 * Math.sqrt(cp.getY(i) / ch);
+        cc.setXYZ(i, cc.getX(i) * k, cc.getY(i) * k, cc.getZ(i) * k);
+      }
+    }
     parts.push(place(cap, top.x, top.y - ch * 0.15, top.z));
     if (rng() < 0.6) {          // glowing spots under the cap rim
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2 + rng();
-        parts.push(place(blob(rng, r * 0.08, pal.accent),
+        parts.push(place(blob(rng, r * 0.08, pal.accent, noise),
           top.x + Math.cos(a) * r * 0.8, top.y + ch * 0.18, top.z + Math.sin(a) * r * 0.8));
       }
     }
@@ -168,7 +226,7 @@ function buildTree(rng, pal, canopyColor) {
         new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.9 + rng() * 0.5));
       parts.push(place(f, top.x, top.y, top.z, _q.clone()));
     }
-    parts.push(place(blob(rng, h * 0.07, pal.accent), top.x, top.y, top.z));
+    parts.push(place(blob(rng, h * 0.07, pal.accent, noise), top.x, top.y, top.z));
   } else {                       // tentacles
     const n = 4 + (rng() * 3) | 0;
     for (let i = 0; i < n; i++) {
@@ -176,7 +234,7 @@ function buildTree(rng, pal, canopyColor) {
       const t = bentTube(rng, pal, h * (0.4 + rng() * 0.3), r1 * 1.5, 0.02,
         Math.cos(a) * (0.8 + rng() * 0.7), Math.sin(a) * (0.8 + rng() * 0.7), canopyColor, 4, 5);
       for (const g of t.parts) parts.push(place(g, top.x, top.y, top.z));
-      parts.push(place(blob(rng, h * 0.045, pal.accent), top.x + t.top.x, top.y + t.top.y, top.z + t.top.z));
+      parts.push(place(blob(rng, h * 0.045, pal.accent, noise), top.x + t.top.x, top.y + t.top.y, top.z + t.top.z));
     }
   }
   return { geo: shadeVertical(mergeGeos(parts), 0.62, 1.16), style, h };
@@ -227,7 +285,7 @@ function buildShrub(rng, pal) {
   return shadeVertical(mergeGeos(parts), 0.7, 1.15);
 }
 
-function buildPodPlant(rng, pal) {
+function buildPodPlant(rng, pal, noise) {
   // person-height glowing bulbs on bent stalks — a landmark, not a pebble
   const parts = [];
   const n = 2 + (rng() * 2.4) | 0;
@@ -236,7 +294,7 @@ function buildPodPlant(rng, pal) {
     const t = bentTube(rng, pal, h, 0.05, 0.03,
       (rng() - 0.5) * 0.9, (rng() - 0.5) * 0.9, pal.trunk, 4, 5);
     parts.push(...t.parts);
-    parts.push(place(blob(rng, 0.2 + rng() * 0.16, pal.accent), t.top.x, t.top.y + 0.08, t.top.z));
+    parts.push(place(blob(rng, 0.2 + rng() * 0.16, pal.accent, noise), t.top.x, t.top.y + 0.08, t.top.z));
   }
   return { geo: shadeVertical(mergeGeos(parts), 0.78, 1.1), glow: pal.accent.clone() };
 }
@@ -311,10 +369,13 @@ export function floraPalette(planet, rng) {
 // every geometry here is a pure function of the planet seed
 export function buildFlora(planet) {
   const rng = makeRng(planet.seed + ':flora');
+  // its OWN stream: building a Simplex burns 255 draws, and taking those from
+  // `rng` would shift every species decision downstream of it
+  const noise = new Simplex(makeRng(planet.seed + ':flora:shape'));
   const pal = planet.floraPal || floraPalette(planet, rng);
-  const pod = buildPodPlant(rng, pal);
-  const t0 = buildTree(rng, pal, pal.canopy);
-  const t1 = buildTree(rng, pal, pal.canopy2);
+  const pod = buildPodPlant(rng, pal, noise);
+  const t0 = buildTree(rng, pal, pal.canopy, noise);
+  const t1 = buildTree(rng, pal, pal.canopy2, noise);
   return {
     tree0: t0.geo,
     tree1: t1.geo,

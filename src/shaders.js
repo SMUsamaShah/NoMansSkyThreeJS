@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { Simplex } from './noise.js';
 import { makeRng } from './rng.js';
+import { injectAerial } from './scattering.js';
 
 // one global clock drives water and wind everywhere
 export const TIME = { value: 0 };
@@ -315,8 +316,11 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
           vec3 bitn = cross(normal, tang);
           normal = normalize(normal + (tang * gx + bitn * gy) * uDetailK * (1.7 + vMat.x * 1.5));
         }`);
+    // terrain knows its own altitude exactly, so its haze thins correctly up
+    // a mountainside instead of using the camera's height everywhere
+    injectAerial(shader, 'length(vLocalPos) - uPlanetR');
   };
-  material.customProgramCacheKey = () => 'terrain-palette-v4';
+  material.customProgramCacheKey = () => 'terrain-palette-v5';
 }
 
 // Living water: scrolling normal perturbation, plus Beer–Lambert depth
