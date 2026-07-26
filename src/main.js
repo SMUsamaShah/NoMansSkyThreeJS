@@ -934,6 +934,8 @@ window.NMS = {
     const st = universe.system.station;
     return st ? { name: st.name, topology: st.topology, radius: Math.round(st.radius) } : null;
   },
+  throttle(v) { spaceCtl.setThrottle(v); return spaceCtl.throttle; },
+  speed: () => spaceCtl.speed,
   audioStart() { ambientAudio.start(); return ambientAudio.started; },
   audioState() { return ambientAudio.state(); },
   // hover low over a sunlit stretch of coastline, facing out to sea —
