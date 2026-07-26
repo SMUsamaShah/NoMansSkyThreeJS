@@ -11,6 +11,7 @@ import { SpaceControls, WalkControls, keys } from './controls.js';
 import { Scatter } from './scatter.js';
 import { FarFlora } from './farflora.js';
 import { Ambience } from './audio.js';
+import { bakeNebula } from './nebula.js';
 import { WarpStreaks, SkyDome, Ship } from './effects.js';
 import { tickShaders } from './shaders.js';
 import { EffectComposer } from '../vendor/jsm/postprocessing/EffectComposer.js';
@@ -153,6 +154,17 @@ let frameNo = 0;
 let lastBuildFrame = 0;
 
 // ---- world ------------------------------------------------------------------
+// ---- the sky: a GPU-baked nebula cubemap (one bake per universe, then free)
+const NEBULA = qs.get('nebula') !== '0';
+let nebulaRT = null;
+function installNebula(seed) {
+  if (!NEBULA) return;
+  if (nebulaRT) nebulaRT.dispose();
+  nebulaRT = bakeNebula(renderer, seed);
+  scene.background = nebulaRT.texture;
+  scene.backgroundIntensity = 1;
+}
+
 let universe = new Universe(SEED, scene);
 const scatter = new Scatter();
 // far tier: proxy trees to the horizon (?farflora=0 spares SwiftShader tests)
@@ -285,14 +297,14 @@ function setState(s) {
   ui.setCrosshair(s === 'walk');
   ui.showTouchUI(IS_TOUCH && s === 'walk');
   const hints = IS_TOUCH ? {
-    space: '<b>drag</b> look · <b>pinch</b> fly · <b>tap</b> a planet or a far star · <b>two-finger drag</b> orbit',
+    space: '<b>drag</b> look · <b>pinch</b> throttle · <b>tap</b> a planet or a far star · <b>two-finger drag</b> orbit',
     flyto: 'travelling…',
     landing: 'descending…',
     walk: '<b>stick</b> move (push far to run) · <b>drag</b> look · <b>⤊</b> jump · <b>🚀</b> take off',
     takeoff: 'lifting off…',
     warp: 'warping…',
   } : {
-    space: '<b>scroll</b> fly · <b>drag</b> look · <b>click</b> a planet or a far star · <b>right-drag</b> orbit',
+    space: '<b>scroll</b>/<b>W·S</b> throttle · <b>drag</b> look · <b>A·D</b> strafe · <b>Q·E</b> roll · <b>shift</b> boost · <b>space</b> brake · <b>click</b> a planet or star',
     flyto: 'travelling… <b>Esc</b> to abort',
     landing: 'descending…',
     walk: '<b>WASD</b> move · <b>shift</b> run · <b>space</b> jump · <b>T</b> take off',
@@ -480,6 +492,7 @@ function newUniverse(seed) {
   scatter.clear();
   universe.dispose();
   universe = new Universe(SEED, scene);
+  installNebula(SEED);
   wireUniverse(universe);
   focusPlanet = null;
   focusStar = null;
@@ -719,6 +732,7 @@ function frame() {
   // controls / state integration
   if (state === 'space') {
     spaceCtl.speedScale = clamp(nearestAlt * 0.55, 4, 3e6);
+    ui.setThrottle(state === 'space' ? spaceCtl.throttle : null, spaceCtl.boosting);
     spaceCtl.update(dt);
     // never fly into the ground
     if (nearest && nearestAlt < 3) {
@@ -836,6 +850,7 @@ function frame() {
 
 wireUniverse(universe);
 spawn();
+installNebula(SEED);
 ui.setLoading(true, 'generating universe…');
 frame();
 
@@ -878,6 +893,7 @@ window.NMS = {
     const p = universe.system.planets[i];
     if (!p) return false;
     tweens.length = 0;
+    spaceCtl.resetFlight();
     if (walkCtl.active) walkCtl.exit();
     setState('space');
     const sunDir = p.sunDirLocal.clone();
@@ -902,6 +918,7 @@ window.NMS = {
     const st = universe.system.station;
     if (!st) return false;
     tweens.length = 0;
+    spaceCtl.resetFlight();
     if (walkCtl.active) walkCtl.exit();
     setState('space');
     const sunDir = _v3.copy(universe.system.star.pos).sub(st.posUniv).normalize();
@@ -975,6 +992,7 @@ window.NMS = {
     if (!p) return false;
     window.NMS_NOLOCK = true;
     tweens.length = 0;
+    spaceCtl.resetFlight();
     const sunDir = p.sunDirLocal.clone();
     const meadow = bias === 'meadow';
     let prefer = sunDir, ring = null;

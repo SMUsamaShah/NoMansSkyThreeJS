@@ -1,5 +1,7 @@
-// Input controllers. SpaceControls: free-look + scroll-wheel flight where
-// speed scales with altitude (orbit→treetops on one wheel). WalkControls:
+// Input controllers. SpaceControls: a throttle-based flight model — mouse
+// steers, the wheel (or W/S) sets a cruise throttle the ship eases into,
+// strafe/roll on the keys, boost and brake. Cruise speed scales with
+// altitude so one throttle range covers orbit down to treetops. WalkControls:
 // first-person on a sphere — gravity points at the planet core and the
 // ground is the planet's own height function, not a mesh raycast.
 
@@ -22,6 +24,7 @@ const _q = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 export class SpaceControls {
   constructor(dom, nav, { onClick } = {}) {
@@ -30,7 +33,9 @@ export class SpaceControls {
     this.onClick = onClick;
     this.enabled = true;
     this.speedScale = 1000;          // set per-frame by main from altitude
-    this.wheelImpulse = 0;
+    this.throttle = 0;               // -0.35 .. 1, persistent cruise setting
+    this.boosting = false;
+    this.speed = 0;                  // current speed, m/s (HUD)
     this.focus = null;               // planet (for RMB orbit / two-finger orbit)
 
     // active pointers (multi-touch aware: 1 finger = look, 2 = pinch-fly + orbit)
@@ -86,10 +91,10 @@ export class SpaceControls {
     prev.x = e.clientX; prev.y = e.clientY;
 
     if (this.pointers.size === 2) {
-      // pinch: spread = fly forward, squeeze = fly back (the touch "wheel")
+      // pinch is the touch throttle: spread = accelerate, squeeze = slow
       const pts = [...this.pointers.values()];
       const dist = this.pinchDistOf(pts);
-      this.wheelImpulse += (dist - this._pinchDist) * 1.0;
+      this.setThrottle(this.throttle + (dist - this._pinchDist) * 0.005);
       this._pinchDist = dist;
       // two-finger drag orbits the focused planet
       const mid = this.midpointOf(pts);
@@ -139,35 +144,66 @@ export class SpaceControls {
     if (wasClick && btn === 0 && this.onClick) this.onClick(e.clientX, e.clientY);
   }
 
+  // the wheel is a THROTTLE, not a teleport: it sets how fast you want to
+  // cruise, and the ship accelerates into it
   wheel(e) {
     e.preventDefault();
     if (!this.enabled) return;
     const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 120 : 1;
-    this.wheelImpulse += -e.deltaY * unit;
+    this.setThrottle(this.throttle + (-e.deltaY * unit) * 0.0016);
   }
+
+  setThrottle(v) { this.throttle = Math.max(-0.35, Math.min(1, v)); }
+  resetFlight() { this.throttle = 0; this.speed = 0; }
 
   update(dt) {
     const nav = this.nav;
-    nav.vel.multiplyScalar(Math.exp(-dt * 2.4));
-    if (this.enabled && this.wheelImpulse !== 0) {
-      _f.set(0, 0, -1).applyQuaternion(nav.quat);
-      nav.vel.addScaledVector(_f, this.wheelImpulse * 0.012 * this.speedScale);
-      this.wheelImpulse = 0;
-      const maxV = this.speedScale * 18;
-      if (nav.vel.length() > maxV) nav.vel.setLength(maxV);
-    } else {
-      this.wheelImpulse = 0;
+    if (!this.enabled) {
+      nav.vel.multiplyScalar(Math.exp(-dt * 2.4));
+      nav.pos.addScaledVector(nav.vel, dt);
+      this.speed = nav.vel.length();
+      return;
     }
-    // gentle WASD strafing as a bonus in space
-    if (this.enabled) {
-      const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
-      const r = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
-      if (f || r) {
-        _f.set(r, 0, -f).normalize().applyQuaternion(nav.quat);
-        nav.vel.addScaledVector(_f, this.speedScale * 2.2 * dt);
-      }
+
+    // keyboard throttle mirrors the wheel; brake cuts it and kills momentum
+    if (keys.KeyW) this.setThrottle(this.throttle + dt * 0.85);
+    if (keys.KeyS) this.setThrottle(this.throttle - dt * 0.85);
+    const braking = keys.Space || keys.KeyX;
+    if (braking) this.setThrottle(this.throttle * Math.exp(-dt * 6));
+    this.boosting = !!(keys.ShiftLeft || keys.ShiftRight);
+
+    // cruise target: throttle × altitude-scaled speed, boost on shift
+    const cruise = this.throttle * this.speedScale * 14 * (this.boosting ? 3.5 : 1);
+    _f.set(0, 0, -1).applyQuaternion(nav.quat);
+
+    // split velocity into along-heading and lateral parts: the engines pull
+    // the along part toward cruise, the dampeners bleed the lateral part —
+    // that asymmetry is what makes a ship feel like a ship and not a camera
+    const along = nav.vel.dot(_f);
+    _v.copy(_f).multiplyScalar(along);
+    _v2.copy(nav.vel).sub(_v);                       // lateral
+    const kA = 1 - Math.exp(-dt * (braking ? 4.0 : 1.35));
+    const newAlong = along + (cruise - along) * kA;
+    _v2.multiplyScalar(Math.exp(-dt * (braking ? 5.0 : 1.1)));
+    nav.vel.copy(_f).multiplyScalar(newAlong).add(_v2);
+
+    // strafe (A/D) and vertical (R/F) thrusters
+    const r = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+    const u = (keys.KeyR ? 1 : 0) - (keys.KeyF ? 1 : 0);
+    if (r || u) {
+      _v.set(r, u, 0).applyQuaternion(nav.quat);
+      nav.vel.addScaledVector(_v, this.speedScale * 3.0 * dt);
     }
+    // roll (Q/E) — free-flight orientation, no artificial up vector
+    const roll = (keys.KeyE ? 1 : 0) - (keys.KeyQ ? 1 : 0);
+    if (roll) {
+      nav.quat.multiply(_q.setFromAxisAngle(Z_AXIS, -roll * dt * 1.1)).normalize();
+    }
+
+    const maxV = this.speedScale * 60;
+    if (nav.vel.length() > maxV) nav.vel.setLength(maxV);
     nav.pos.addScaledVector(nav.vel, dt);
+    this.speed = nav.vel.length();
   }
 
   dispose() {

@@ -107,51 +107,6 @@ function glowTexture(size = 128, inner = 0.0, tight = false) {
   return new THREE.CanvasTexture(canvas);
 }
 
-// cloudy blotch texture: dozens of soft blobs accumulated, then masked so
-// the rim fades out — reads as nebula gas / a galaxy streak instead of the
-// perfect-circle lens halo a plain radial gradient produces
-function cloudTexture(rand, size = 256, band = false) {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = band ? size / 2 : size;
-  const H = canvas.height;
-  const ctx = canvas.getContext('2d');
-  const blobs = band ? 110 : 55;
-  for (let i = 0; i < blobs; i++) {
-    const bx = rand() * size;
-    const by = band ? H * (0.5 + (rand() - 0.5) * 0.6) : rand() * H;
-    const br = (band ? 0.04 + rand() * 0.1 : 0.06 + rand() * 0.15) * size;
-    const g = ctx.createRadialGradient(bx, by, 0, bx, by, br);
-    g.addColorStop(0, `rgba(255,255,255,${0.05 + rand() * 0.1})`);
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, H);
-  }
-  ctx.globalCompositeOperation = 'destination-in';
-  if (band) {
-    let g = ctx.createLinearGradient(0, 0, 0, H);      // soft vertical profile
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.5, 'rgba(0,0,0,1)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, H);
-    g = ctx.createLinearGradient(0, 0, size, 0);       // ends fade → segments blend
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.25, 'rgba(0,0,0,1)');
-    g.addColorStop(0.75, 'rgba(0,0,0,1)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, H);
-  } else {
-    const g = ctx.createRadialGradient(size / 2, H / 2, size * 0.08, size / 2, H / 2, size * 0.5);
-    g.addColorStop(0, 'rgba(0,0,0,1)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, H);
-  }
-  return new THREE.CanvasTexture(canvas);
-}
-
 export class Universe {
   constructor(seedStr, scene) {
     this.seed = seedStr;
@@ -206,53 +161,9 @@ export class Universe {
     };
   }
 
-  buildSkybox() {
-    const rand = makeRng(this.seed + ':skybox');
-    // nebulae: big soft additive sprites at infinity (purely scenery — unlike
-    // the stars, which are all real places)
-    this.nebulas = new THREE.Group();
-    const nCount = 4 + ((rand() * 3) | 0);
-    for (let i = 0; i < nCount; i++) {
-      // each nebula gets its own blotchy texture — a shared radial gradient
-      // made them read as identical circular halos pinned to the sky
-      const mat = new THREE.SpriteMaterial({
-        map: cloudTexture(rand), transparent: true, opacity: 0.08 + rand() * 0.08,
-        color: new THREE.Color().setHSL(rand(), 0.7, 0.55),
-        rotation: rand() * Math.PI * 2,
-        blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-      });
-      const spr = new THREE.Sprite(mat);
-      _v.set(rand() * 2 - 1, (rand() * 2 - 1) * 0.5, rand() * 2 - 1).normalize().multiplyScalar(1.8e9);
-      spr.position.copy(_v);
-      const s = (1.2 + rand() * 2.2) * 6.5e8;
-      spr.scale.set(s, s * (0.55 + rand() * 0.5), 1);   // gas clouds aren't round
-      this.nebulas.add(spr);
-    }
-    // the Milky Way: a faint streaky band along the galactic disc plane —
-    // segments share one noise texture whose ends fade so they blend into a
-    // continuous river of light instead of a ring of separate blobs
-    const bandTex = cloudTexture(rand, 256, true);
-    const bandTilt = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler((rand() - 0.5) * 0.35, 0, (rand() - 0.5) * 0.35));
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const mesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.6e9, 4.2e8),
-        new THREE.MeshBasicMaterial({
-          map: bandTex, transparent: true, opacity: 0.055 + rand() * 0.035,
-          color: new THREE.Color().setHSL(0.08 + rand() * 0.5, 0.25, 0.72),
-          blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-          side: THREE.DoubleSide,
-        }),
-      );
-      mesh.position.set(Math.cos(a) * 2.2e9, (rand() - 0.5) * 6e7, Math.sin(a) * 2.2e9)
-        .applyQuaternion(bandTilt);
-      mesh.lookAt(0, 0, 0);
-      this.nebulas.add(mesh);
-    }
-    this.nebulas.renderOrder = -9;
-    this.scene.add(this.nebulas);
-  }
+  // The sky backdrop is a GPU-baked nebula cubemap (src/nebula.js) installed
+  // as scene.background by main.js — no sprites, no planes, no halos.
+  buildSkybox() {}
 
   // deferred=true: the sun appears now, planets materialize one per
   // buildNext() call — spreads the cost over warp/approach frames
@@ -389,21 +300,6 @@ export class Universe {
     this.relativizeSystem(this.system, camPos);
     if (this.fadingSystem) this.relativizeSystem(this.fadingSystem, camPos);
     if (this.nearStarsMesh) this.nearStarsMesh.position.copy(camPos).negate();
-    // nebula/band opacity = star dimming × (for the band PLANES) an edge-on
-    // fade — an additive plane viewed edge-on concentrates into a hard
-    // bright line slicing the sky
-    const dim = 1 - (this._starDim || 0);
-    for (const n of this.nebulas.children) {
-      if (n.userData.baseOp === undefined) n.userData.baseOp = n.material.opacity;
-      let k = 1;
-      if (n.isMesh) {
-        _v.copy(n.position).sub(camPos).normalize();
-        _v2.set(0, 0, 1).applyQuaternion(n.quaternion);
-        const face = Math.abs(_v.dot(_v2));
-        k = face * face;
-      }
-      n.material.opacity = n.userData.baseOp * k * dim;
-    }
   }
 
   // x: 0 in space → 1 with the sun on the horizon seen through atmosphere.
@@ -416,28 +312,22 @@ export class Universe {
 
   setStarDimming(f) {
     // f: 0 in deep space -> 1 inside a bright daytime atmosphere
-    // (nebula/band opacity is applied per-frame in updateRelative)
     if (this.starMaterial) this.starMaterial.uniforms.uDim.value = f;
     this._starDim = f;
+    // the baked nebula sky fades with the stars (daylight washes it out)
+    this.scene.backgroundIntensity = Math.max(0, 1 - f);
   }
 
   dispose() {
     if (this.fadingSystem) this.fadingSystem.dispose();
     this.fadingSystem = null;
     if (this.system) this.system.dispose();
-    this.scene.remove(this.group, this.nebulas);
+    this.scene.remove(this.group);
     if (this.nearStarsMesh) {
       this.scene.remove(this.nearStarsMesh);
       this.nearStarsMesh.geometry.dispose();
     }
     if (this.starMaterial) this.starMaterial.dispose();
-    const seenTex = new Set();
-    for (const n of this.nebulas.children) {
-      const tex = n.material.map;
-      if (tex && tex !== this.glowTex && !seenTex.has(tex)) { seenTex.add(tex); tex.dispose(); }
-      n.material.dispose();
-      if (n.geometry) n.geometry.dispose();
-    }
     this.glowTex.dispose();
     this.glowTexTight.dispose();
   }

@@ -113,6 +113,25 @@ export class UI {
     this.els.altitude.textContent = `ALT ${a}   SPD ${s}`;
   }
 
+  // throttle bar: a persistent cruise setting needs to be visible or the
+  // ship's behaviour looks like it has a mind of its own
+  setThrottle(t, boosting) {
+    if (!this.els.throttle) {
+      const el = document.createElement('div');
+      el.id = 'throttle';
+      el.innerHTML = '<div class="th-track"><div class="th-fill"></div></div><span class="th-num"></span>';
+      document.body.appendChild(el);
+      this.els.throttle = el;
+    }
+    const el = this.els.throttle;
+    if (t == null) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const pct = Math.round(t * 100);
+    el.querySelector('.th-fill').style.height = `${Math.abs(pct)}%`;
+    el.querySelector('.th-fill').style.background = t < 0 ? '#e0763c' : boosting ? '#ffd166' : '#6fd6ff';
+    el.querySelector('.th-num').textContent = `${pct}%${boosting ? ' ⏵⏵' : ''}`;
+  }
+
   setHint(text) {
     if (this._hint === text) return;
     this._hint = text;
