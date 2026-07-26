@@ -221,6 +221,63 @@ Citizen and Elite Dangerous, indexed by the property each one demonstrates
 sky restraint, clouds); `reference/README.md` says what to look for in each
 and which requirement it backs. Refresh with `node tools/fetch_reference.mjs`.
 
+## 3c. Terrain/vegetation research report — what we take, what we reject
+
+A research report ("Building a Procedural Ground-to-Space Terrain System in
+Three.js") was supplied 2026-07-26. It was scoped to a *greenfield* project with
+a no-build/CDN constraint, so much of it describes work already done here. The
+useful residue is real, though, and is recorded below so it is not re-derived.
+
+**Rejected — its headline recommendation.** The report's central advice is
+"build a flat CDLOD/clipmap heightfield, NOT a cube-sphere planet," to dodge
+cube-face seams and float breakdown. **We do not take this.** It is sound advice
+for its stated brief and wrong for ours: §2.1 requires flying from deep space to
+any star and orbiting real planets, and the cube-sphere quadtree with geomorphed
+LOD, seam tests and camera-relative rendering is the most mature system in this
+repo. Its own "thresholds that change the plan" note concedes the point —
+curvature and true orbit mean cube-sphere. The two problems it warns about are
+already solved here (camera-relative rendering *is* the floating origin;
+`npm run seamtest` guards the faces).
+
+**Already done, no action:** logarithmic depth buffer; floating origin;
+vegetation folded into terrain albedo at distance (§2.4's far tier → canopy
+tint, which the report calls its single most important insight); Whittaker-style
+biomes; seeded simplex fBm/ridged/domain-warped noise; macro+detail blending;
+triplanar on terrain; instanced everything.
+
+**Taken — ranked, none implemented yet:**
+1. **Hydraulic/thermal erosion.** The clearest gap against `reference/`: Daymar
+   and microTech have dendritic channels and sediment fans; our fBm ridges have
+   none. Erosion is a grid simulation, not a closed-form function of a
+   direction, so it cannot go straight into `height()` — the report's own
+   pragmatic route (bake offline into tiling detail heightmaps, blend in)
+   is the one compatible with our LOD/determinism constraints. Must stay
+   consistent CPU-side for placement and across LOD levels.
+2. **An "erosion"/flatness control field** (Minecraft 1.18's second axis: high
+   erosion → lower and *flatter*). Our worlds are uniformly rugged; the
+   references have vast flat plains punctuated by relief. This one *is*
+   closed-form, LOD-safe and cheap — best value-to-risk on the list.
+3. **View-space thickening for grass** (Ghost of Tsushima): rotate near-edge-on
+   blades toward the camera so they never vanish. Our blades are real
+   `frond()` geometry rendered DoubleSide, so this applies directly.
+4. **Stochastic / hex tiling** (Quílez texture-repetition) on the detail
+   texture. At the near-field octave (~0.35 m) the 256px tile repeats hundreds
+   of times across a vista. Costs extra samples — measure.
+5. **Octahedral impostors** for the far flora tier, replacing ~40-triangle
+   proxies. Would raise achievable density enough to attack the
+   "monoculture at one scale" gap (§3b item 4's successor).
+6. **Web Workers for chunk generation.** We build on the main thread against a
+   millisecond budget; transferable `ArrayBuffer`s would remove the hitch
+   ceiling rather than manage it.
+7. **`BatchedMesh`** (r156+) to consolidate draw calls (currently 850–1000).
+
+**To verify, not assume:** the report claims the logarithmic depth buffer
+degrades MSAA where geometry intersects (three.js #22017) and recommends
+post-process FXAA/SMAA instead. We run `logarithmicDepthBuffer: true` *and* a
+4-sample MSAA composer target, so if true this affects us directly — check it
+before acting. Its Ghost of Tsushima LOD numbers are second-hand (it says so),
+and several performance claims are sourced to vendor blog posts.
+
 ## 4. Engineering constraints & practices
 
 - **Determinism**: generation is a pure function of the seed. Never let placement
