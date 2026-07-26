@@ -82,7 +82,20 @@ Recreate the *experience* of No Man's Sky in the browser with three.js:
   is done well, **research prior art on the internet** (owner explicitly asked
   for this — e.g. the beautiful three.js grass demos).
 
-### 2.5 Sky backdrop
+### 2.5 Sky backdrop — nebulae and deep space
+- Owner: "there should be something like nebula or gas clouds in the space
+  too. I dont see that currently." Deep space must have visible **gas
+  structure**: filaments, dust lanes, star-forming knots, a galactic band.
+- Implemented as a GPU-baked cubemap (`src/nebula.js`) installed as
+  `scene.background` — baked once per universe so the shader can be lavish
+  while costing one texture fetch per frame. Seeded palette; re-baked on
+  "new universe"; fades with `scene.backgroundIntensity` in daylight.
+- **Restraint is the requirement**, not decoration: space is mostly black.
+  If the sky reads as fog, or objects silhouette black against it, the
+  nebula is too bright — structure only reads where most of the sky has
+  none. `?nebula=0` disables it for tests.
+
+### 2.5b Legacy sky artifacts (never regress)
 - Nebulae and the galaxy band must read as natural scenery, not artifacts.
   Owner's bug report to never regress: *"white halos all around in a circle"*
   (the band segments showing as blobs) and *"coloured spherical halos"*
@@ -117,7 +130,15 @@ Recreate the *experience* of No Man's Sky in the browser with three.js:
   pieces of very different sizes.
 
 ### 2.9 Controls & platforms
-- Desktop: WASD walking, mouse look, scroll fly, click-to-travel, L to land,
+- **Flight is throttle-based** (owner: "scroll to zoom/move forward does not
+  make sense anymore"). Scroll or W/S sets a persistent cruise throttle the
+  ship *accelerates into* — never a teleport-forward impulse. A/D strafe,
+  Q/E roll, R/F vertical thrusters, Shift boost, Space brake. Engine
+  response acts along the heading while dampeners bleed lateral velocity —
+  that asymmetry is what makes it feel like a ship. A visible HUD throttle
+  bar is mandatory: a persistent setting must never be invisible. Any jump
+  (teleport/land/vista) resets the throttle.
+- Desktop: WASD walking on foot, mouse look, click-to-travel, L to land,
   T to take off, jump.
 - Touch/mobile: fully playable — drag look, pinch fly, tap-to-travel, virtual
   joystick, jump/takeoff buttons; verified by the touch test suite.

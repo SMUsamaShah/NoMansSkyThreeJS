@@ -64,37 +64,38 @@ void main() {
   vec3 w = vec3(fbm(p * 1.7, 4), fbm(p * 1.7 + 5.2, 4), fbm(p * 1.7 + 11.3, 4)) - 0.5;
   vec3 pw = p + w * 1.9;
 
-  // ---- the galactic band: a luminous river with a dark central rift
+  // ---- the galactic band: a narrow luminous river with a dark central rift.
+  // Restraint is the whole game here: space is BLACK, and structure only
+  // reads as structure when most of the sky has none.
   float lat = dot(d, normalize(uBand));
   float bandN = fbm(p * 0.9 + 3.1, 5);
-  float band = exp(-pow(abs(lat) * (2.7 + bandN * 1.6), 2.0));
+  float band = exp(-pow(abs(lat) * (5.4 + bandN * 2.6), 2.0));
   float rift = smoothstep(0.35, 0.62, fbm(p * 2.6 + 7.7, 5));       // dust lanes
-  band *= mix(0.28, 1.0, rift);
+  band *= mix(0.15, 1.0, rift);
   // the band is made of unresolved stars: grainy, not smooth
-  band *= 0.55 + 0.9 * fbm(pw * 5.5, 5);
+  band *= 0.45 + 1.0 * fbm(pw * 5.5, 5);
 
-  // ---- nebula clouds: ridged filaments, gated by a big soft mask so the
-  // sky has clear regions instead of uniform soup
-  float mask = smoothstep(0.42, 0.78, fbm(p * 0.55 + 21.0, 4));
+  // ---- nebula clouds: ridged filaments in a FEW regions of sky, not soup
+  float mask = smoothstep(0.56, 0.86, fbm(p * 0.55 + 21.0, 4));
   float fil = ridge(pw * 2.2, 6);
-  float cloud = pow(max(fil - 0.42, 0.0) * 1.7, 1.5) * mask;
-  float cloud2 = pow(max(ridge(pw * 4.1 + 13.0, 5) - 0.5, 0.0) * 1.9, 1.7)
-               * smoothstep(0.5, 0.85, fbm(p * 0.7 + 44.0, 4));
+  float cloud = pow(max(fil - 0.52, 0.0) * 1.9, 2.0) * mask;
+  float cloud2 = pow(max(ridge(pw * 4.1 + 13.0, 5) - 0.58, 0.0) * 2.1, 2.2)
+               * smoothstep(0.62, 0.9, fbm(p * 0.7 + 44.0, 4));
 
-  // ---- colour: two gas species plus hot cores
-  vec3 col = uColA * cloud * 1.15 + uColB * cloud2 * 0.95;
-  float knot = pow(max(cloud - 0.55, 0.0) * 2.2, 3.0);              // star-forming knots
-  col += uColC * knot * 2.2;
-  col *= uCloudK;
-  col += uColC * band * uBandK * 0.42;
-  col += vec3(0.55, 0.62, 0.85) * band * uBandK * 0.5;
+  // ---- colour: two gas species plus hot cores (HDR only in the knots, so
+  // bloom picks out the cores and nothing else)
+  vec3 col = uColA * cloud * 0.62 + uColB * cloud2 * 0.5;
+  float knot = pow(max(cloud - 0.5, 0.0) * 2.2, 3.0);               // star-forming knots
+  col += uColC * knot * 1.6;
+  col *= uCloudK * 0.5;
+  col += (uColC * 0.35 + vec3(0.34, 0.40, 0.60)) * band * uBandK * 0.14;
 
   // ---- occlusion by foreground dust: cold dark filaments over everything
   float dust = smoothstep(0.55, 0.85, ridge(pw * 3.3 + 61.0, 5)) * mask;
-  col *= 1.0 - dust * 0.55;
+  col *= 1.0 - dust * 0.6;
 
-  // a faint cold floor so deep space is not pure black
-  col += vec3(0.008, 0.010, 0.020);
+  // a whisper of cold floor so deep space is not a flat void
+  col += vec3(0.0035, 0.0045, 0.010);
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -116,8 +117,8 @@ export function bakeNebula(renderer, seed, size = 512) {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uBand: { value: new THREE.Vector3(rng() - 0.5, 1, rng() - 0.5).normalize() },
-      uColA: { value: new THREE.Color().setHSL(hA, 0.72, 0.5) },
-      uColB: { value: new THREE.Color().setHSL(hB, 0.66, 0.46) },
+      uColA: { value: new THREE.Color().setHSL(hA, 0.85, 0.5) },
+      uColB: { value: new THREE.Color().setHSL(hB, 0.78, 0.46) },
       uColC: { value: new THREE.Color().setHSL(hC, 0.5, 0.62) },
       uOff: { value: new THREE.Vector3(rng() * 40, rng() * 40, rng() * 40) },
       uBandK: { value: 0.5 + rng() * 0.45 },

@@ -12,7 +12,7 @@ import { Scatter } from './scatter.js';
 import { FarFlora } from './farflora.js';
 import { Ambience } from './audio.js';
 import { bakeNebula } from './nebula.js';
-import { WarpStreaks, SkyDome, Ship } from './effects.js';
+import { WarpStreaks, SkyDome, Ship, SpaceDust } from './effects.js';
 import { tickShaders } from './shaders.js';
 import { EffectComposer } from '../vendor/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from '../vendor/jsm/postprocessing/RenderPass.js';
@@ -175,6 +175,7 @@ const farFlora = new FarFlora();
 // opts in; M then toggles mute.
 const ambientAudio = new Ambience(qs.get('audio') === '1');
 const warpStreaks = new WarpStreaks(scene);
+const spaceDust = new SpaceDust(scene);
 const skyDome = new SkyDome(scene);
 const ship = new Ship(scene);
 let warpIntensity = 0;
@@ -752,6 +753,8 @@ function frame() {
   // true frame velocity (a warp moves nav.pos directly, not via nav.vel)
   if (frameNo > 2) _velActual.copy(nav.pos).sub(prevNavPos).multiplyScalar(1 / dt);
   warpStreaks.update(dt, _velActual, warpIntensity);
+  // dust motes: the cue that turns a throttle number into felt speed
+  spaceDust.update(nav.pos, _velActual, state !== 'walk' && warpIntensity < 0.05);
   // a deferred system (warp or manual approach) materializes one planet/frame
   if (universe.system && !universe.system.built) universe.system.buildNext();
 

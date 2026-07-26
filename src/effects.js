@@ -394,3 +394,77 @@ export class Ship {
 }
 const _sq2 = new THREE.Quaternion();
 const _sp = new THREE.Vector3();
+
+
+// ============================================================================
+// Space dust: motes streaking past the canopy. Without something passing you,
+// velocity is invisible in space — this is the cue that makes a throttle feel
+// like speed. Motes live in a cube that follows the camera and WRAPS, so a
+// thousand segments cover unlimited travel.
+// ============================================================================
+
+const DUST_N = 900;
+const DUST_D = 700;          // cube side, metres
+
+export class SpaceDust {
+  constructor(scene) {
+    this.pos = new Float32Array(DUST_N * 3);
+    for (let i = 0; i < DUST_N * 3; i++) this.pos[i] = (Math.random() - 0.5) * DUST_D;
+    const geo = new THREE.BufferGeometry();
+    this.verts = new Float32Array(DUST_N * 6);
+    geo.setAttribute('position', new THREE.BufferAttribute(this.verts, 3));
+    this.mat = new THREE.LineBasicMaterial({
+      color: 0xbfd6ff, transparent: true, opacity: 0, depthWrite: false,
+      blending: THREE.AdditiveBlending, fog: false,
+    });
+    this.mesh = new THREE.LineSegments(geo, this.mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 3;
+    scene.add(this.mesh);
+    this._prev = new THREE.Vector3();
+    this._first = true;
+  }
+
+  // navPos: universe position; vel: current velocity (m/s)
+  update(navPos, vel, visible) {
+    if (this._first) { this._prev.copy(navPos); this._first = false; }
+    _sv.copy(navPos).sub(this._prev);        // camera travel since last frame
+    this._prev.copy(navPos);
+
+    const speed = vel.length();
+    // a band: too slow and there is nothing to see, too fast and it becomes
+    // a strobe (that regime belongs to the warp streaks)
+    const k = visible ? Math.min(1, Math.max(0, (speed - 12) / 260))
+                      * (1 - Math.min(1, Math.max(0, (speed - 2600) / 3000))) : 0;
+    this.mat.opacity = k * 0.5;
+    this.mesh.visible = k > 0.01;
+    if (!this.mesh.visible) return;
+
+    // streak length grows with speed, capped so it never smears the screen
+    const streak = Math.min(70, 0.06 * speed + 1.5);
+    _su.copy(vel).normalize().multiplyScalar(-streak);
+    const H = DUST_D / 2;
+    for (let i = 0; i < DUST_N; i++) {
+      const j = i * 3;
+      // wrap the mote cube around the camera's travel
+      for (let a = 0; a < 3; a++) {
+        let v = this.pos[j + a] - (a === 0 ? _sv.x : a === 1 ? _sv.y : _sv.z);
+        if (v > H) v -= DUST_D; else if (v < -H) v += DUST_D;
+        this.pos[j + a] = v;
+      }
+      const k6 = i * 6;
+      this.verts[k6] = this.pos[j];
+      this.verts[k6 + 1] = this.pos[j + 1];
+      this.verts[k6 + 2] = this.pos[j + 2];
+      this.verts[k6 + 3] = this.pos[j] + _su.x;
+      this.verts[k6 + 4] = this.pos[j + 1] + _su.y;
+      this.verts[k6 + 5] = this.pos[j + 2] + _su.z;
+    }
+    this.mesh.geometry.attributes.position.needsUpdate = true;
+  }
+
+  dispose() {
+    this.mesh.geometry.dispose();
+    this.mat.dispose();
+  }
+}
