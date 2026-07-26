@@ -12,6 +12,7 @@ import { Scatter } from './scatter.js';
 import { FarFlora } from './farflora.js';
 import { Ambience } from './audio.js';
 import { bakeNebula } from './nebula.js';
+import { EnvLighting } from './env.js';
 import { WarpStreaks, SkyDome, Ship, SpaceDust } from './effects.js';
 import { tickShaders } from './shaders.js';
 import { EffectComposer } from '../vendor/jsm/postprocessing/EffectComposer.js';
@@ -157,12 +158,15 @@ let lastBuildFrame = 0;
 // ---- the sky: a GPU-baked nebula cubemap (one bake per universe, then free)
 const NEBULA = qs.get('nebula') !== '0';
 let nebulaRT = null;
+// image-based lighting: without this every metal surface in space is black
+const envLight = new EnvLighting(renderer, scene);
 function installNebula(seed) {
-  if (!NEBULA) return;
+  if (!NEBULA) { envLight.setNebula(null); return; }
   if (nebulaRT) nebulaRT.dispose();
   nebulaRT = bakeNebula(renderer, seed);
   scene.background = nebulaRT.texture;
   scene.backgroundIntensity = 1;
+  envLight.setNebula(nebulaRT.texture);
 }
 
 let universe = new Universe(SEED, scene);
@@ -198,6 +202,8 @@ const _c2 = new THREE.Color();
 const _zenithMul = new THREE.Color(0.3, 0.42, 0.78);
 const _horC = new THREE.Color();
 const _cloudCol = new THREE.Color();
+const _envSunDir = new THREE.Vector3(0, 1, 0);
+const _envGround = new THREE.Color();
 const _warmA = new THREE.Color();
 const _warmB = new THREE.Color();
 const _warmC = new THREE.Color();
@@ -567,7 +573,7 @@ function spawn() {
 }
 
 // ---- ambience: atmosphere entry, sky color, fog, star dimming ------------------
-function ambience() {
+function ambience(dt) {
   let inAtmo = 0, day = 1, skyStrength = 0;
   envUnderwater = false;
   scene.fog.density = 0;
@@ -622,7 +628,9 @@ function ambience() {
       tsh.uniforms.uMistColor.value.copy(_sky).multiplyScalar(1.06);
     }
 
-    hemi.intensity = inAtmo * 1.15 * (0.12 + 0.88 * day);
+    // the environment map now carries sky irradiance too, so the hemisphere
+    // light backs off to the same total rather than double-lighting the ground
+    hemi.intensity = inAtmo * 0.62 * (0.12 + 0.88 * day);
     hemi.color.copy(p.skyColorLin || _sky);
     hemi.groundColor.copy(p.pal.land[Math.min(2, p.pal.land.length - 1)].c);
 
@@ -631,11 +639,34 @@ function ambience() {
     _c2.copy(p.skyColorLin).multiply(_zenithMul);
     skyDome.update(_up, sunDir, _horC, _c2,
       envUnderwater ? 0 : Math.min(inAtmo, 1) * (0.04 + 0.96 * day), envSunset);
+
+    _envSunDir.copy(sunDir);
+    _envGround.copy(p.pal.land[Math.min(2, p.pal.land.length - 1)].c)
+      .multiplyScalar(skyStrength * 0.5);
   } else {
     hemi.intensity = 0;
     envSunset = 0;
     skyDome.update(_up, _up, _sky, _sky, 0, 0);
+    _up.set(0, 1, 0);
+    _envGround.setRGB(0, 0, 0);
+    universe.system.sunDirFrom(nav.pos, _envSunDir);
+    _horC.setRGB(0, 0, 0);
+    _c2.setRGB(0, 0, 0);
   }
+
+  // the environment map that lights every metal surface. Fed the SAME colours
+  // the sky dome just got, so reflections can never disagree with the sky.
+  envLight.update(dt, {
+    atmo: envUnderwater ? 1 : Math.min(inAtmo, 1),
+    up: _up,
+    sunDir: _envSunDir,
+    horizon: envUnderwater ? _sky : _horC,
+    zenith: envUnderwater ? _sky : _c2,
+    ground: _envGround,
+    sunColor: universe.system.sunLight.color,
+    // the sun stops lighting things through an ocean or a planet's night side
+    sunK: envUnderwater ? 0 : 1 - envSunset * 0.55,
+  });
   renderer.setClearColor(_sky.multiplyScalar(nearest ? 1 : 0));
   if (!nearest) renderer.setClearColor(0x000000);
   universe.setStarDimming(clamp(skyStrength * 1.25, 0, 1));
@@ -776,7 +807,7 @@ function frame() {
     farFlora.clear();
   }
 
-  ambience();
+  ambience(dt);
   ambientAudio.update(dt, {
     inAtmo: envInAtmo, day: envDay, underwater: envUnderwater,
     alt: nearestAlt, speed: _velActual.length(),
@@ -938,18 +969,26 @@ window.NMS = {
     return st ? { name: st.name, topology: st.topology, radius: Math.round(st.radius) } : null;
   },
   throttle(v) { spaceCtl.setThrottle(v); return spaceCtl.throttle; },
-  // frame the ship for a proper look at it: narrow the lens onto the
-  // formation pose (the parked ship can be 170 m away — a speck)
-  shipPortrait(fov = 17) {
+  // Frame the ship for a proper look at it. The formation offset is fixed in
+  // camera space, so no amount of looking around can aim at the ship — this
+  // moves the SHIP into a three-quarter hero pose and narrows the lens.
+  // Camera yaw still swings the lighting around it, which is the point.
+  shipPortrait(fov = 34, off = null) {
     if (walkCtl.active) walkCtl.exit();
     setState('space');
     spaceCtl.resetFlight();
     nav.vel.set(0, 0, 0);
+    ship.setPortrait(off || { dist: 15, down: -1.1, side: 3.4 });
     camera.fov = fov;
     camera.updateProjectionMatrix();
     return true;
   },
-  resetFov() { camera.fov = BASE_FOV; camera.updateProjectionMatrix(); return true; },
+  resetFov() {
+    ship.setPortrait(null);
+    camera.fov = BASE_FOV;
+    camera.updateProjectionMatrix();
+    return true;
+  },
   speed: () => spaceCtl.speed,
   audioStart() { ambientAudio.start(); return ambientAudio.started; },
   audioState() { return ambientAudio.state(); },
