@@ -320,8 +320,17 @@ export class Scatter {
       _q.setFromUnitVectors(Y, _jd);
       _q2.setFromAxisAngle(Y, hashFloat(hc, 1) * Math.PI * 2);
       _q.multiply(_q2);
-      const sc = (s0 + (s1 - s0) * hashFloat(hc, 2)) * edge;
-      _s.set(sc, sc * (0.8 + hashFloat(hc, 0) * 0.5), sc);
+      // A second hash, because hashFloat only has three usable lanes (lane 3
+      // would shift past 32 bits) and lane 2 was already spent on the jitter
+      // offset — so size and position were correlated, which is visible as
+      // patterning once you know to look.
+      const hs = hash3i(qx + 977, qy - 401, qz + 733, seedI);
+      // Skewed, not uniform: a real stand is mostly young and small with a few
+      // that got to the light. A flat 0.7–1.3 spread made every tree the same
+      // tree, which is what turned a forest into wallpaper.
+      const t = hashFloat(hs, 0);
+      const sc = (s0 + (s1 - s0) * 1.45 * t * t * t) * edge;
+      _s.set(sc, sc * (0.74 + hashFloat(hs, 1) * 0.62), sc);
       _m.compose(_v2, _q, _s);
       if (kind === 'grass') {
         // tufts blend the ground colour with the planet's canopy tint: they

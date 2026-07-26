@@ -137,11 +137,17 @@ export class CinematicPass extends Pass {
         tDiffuse: { value: null },
         uSun: { value: new THREE.Vector2(0.5, 0.5) },
         uSunIn: { value: 0 },
-        uShaft: { value: opts.shaft ?? 0.85 },
-        uFlare: { value: opts.flare ?? 0.55 },
+        uShaft: { value: opts.shaft ?? 0.55 },
+        uFlare: { value: opts.flare ?? 0.45 },
         uVignette: { value: opts.vignette ?? 0.30 },
-        uCA: { value: opts.ca ?? 0.55 },
-        uGrain: { value: opts.grain ?? 0.030 },
+        // Offset is d*r2*uCA in UV, and r2 maxes at 0.5 — so this is a
+        // FRACTION OF THE SCREEN at the corner, not a pixel count. 0.006 puts
+        // the split near a pixel where it belongs; anything in the tenths
+        // smears the frame edge into a rainbow.
+        uCA: { value: opts.ca ?? 0.006 },
+        // applied in HDR linear, where a night sky sits around 0.01 — grain
+        // that looks timid on a 0..255 scale is deafening down here
+        uGrain: { value: opts.grain ?? 0.006 },
         uTime: { value: 0 },
         uAspect: { value: 1.78 },
       },

@@ -269,6 +269,19 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
             diffuseColor.rgb * vec3(0.88, 0.97, 0.92),
             clamp(-pch * 1.8, 0.0, 0.5) * uMacroK);
 
+          // ---- near-field grit. The finest octave above is ~3 m, so the
+          // metre of ground closest to the eye — the part a standing player
+          // looks straight down at — resolved to a single flat colour. These
+          // two octaves are sub-metre and fade out by 25 m, so they fill the
+          // foreground without aliasing into noise across a whole valley.
+          // (vAerialView comes from scattering.js, injected by this same hook.)
+          float nearK = 1.0 - smoothstep(5.0, 25.0, length(vAerialView));
+          if (nearK > 0.002) {
+            float fine  = triDetail(vLocalPos, w, 0.62, 0) - 0.5;   // ~1.6 m
+            float finer = triDetail(vLocalPos, w, 2.90, 1) - 0.5;   // ~0.35 m
+            diffuseColor.rgb *= 1.0 + (fine * 0.55 + finer * 0.75) * nearK * uDetailK * 1.6;
+          }
+
           // ---- per-pixel snowline: crisp caps from orbit
           if (uSnowK > 0.5) {
             float lat = abs(nd.y) + (texture2D(uDetailTex, nd.xz * 2.0 + nd.y).r - 0.5) * 0.12;
@@ -315,12 +328,22 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
           vec3 tang = normalize(cross(normal, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
           vec3 bitn = cross(normal, tang);
           normal = normalize(normal + (tang * gx + bitn * gy) * uDetailK * (1.7 + vMat.x * 1.5));
+          // matching sub-metre relief up close, so near ground catches the low
+          // sun in grazing highlights instead of shading like a painted plane
+          float nk = 1.0 - smoothstep(4.0, 20.0, length(vAerialView));
+          if (nk > 0.002) {
+            float hx = triDetail(vLocalPos + vec3(0.06, 0.0, 0.0), wN, 2.9, 1)
+                     - triDetail(vLocalPos - vec3(0.06, 0.0, 0.0), wN, 2.9, 1);
+            float hy = triDetail(vLocalPos + vec3(0.0, 0.06, 0.0), wN, 2.9, 1)
+                     - triDetail(vLocalPos - vec3(0.0, 0.06, 0.0), wN, 2.9, 1);
+            normal = normalize(normal + (tang * hx + bitn * hy) * nk * 2.4);
+          }
         }`);
     // terrain knows its own altitude exactly, so its haze thins correctly up
     // a mountainside instead of using the camera's height everywhere
     injectAerial(shader, 'length(vLocalPos) - uPlanetR');
   };
-  material.customProgramCacheKey = () => 'terrain-palette-v5';
+  material.customProgramCacheKey = () => 'terrain-palette-v6';
 }
 
 // Living water: scrolling normal perturbation, plus Beer–Lambert depth

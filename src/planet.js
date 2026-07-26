@@ -627,7 +627,7 @@ export class Planet {
       const atmoR = R + Math.max(this.hAmp * 2.2, R * 0.05);
       this.atmoMesh = new THREE.Mesh(
         new THREE.SphereGeometry(atmoR, 96, 64),
-        makeAtmosphereMaterial(this.atmoColor, this.atmoDensity),
+        makeAtmosphereMaterial(this.atmoColor, this.atmoDensity, R, atmoR),
       );
       this.atmoMesh.renderOrder = 3;
       this.group.add(this.atmoMesh);
@@ -918,38 +918,127 @@ const _msp = new THREE.Vector3();
 const _msd = new THREE.Vector3();
 const _yAxis = new THREE.Vector3(0, 1, 0);
 
-function makeAtmosphereMaterial(color, density) {
+// The planetary limb.
+//
+// This was a Fresnel rim — pow(1 - |dot(n,v)|, 3.3) on the back of a shell —
+// which draws a thin hard blue arc pinned to the planet's edge. It reads as a
+// decal someone stuck on the silhouette, and it was the single biggest tell in
+// every orbital frame. What a real atmosphere does instead is glow across
+// KILOMETRES: a white-hot band hugging the surface grading out through cyan to
+// deep blue and finally to black, brightest on the sun side, with a warm band
+// at the terminator.
+//
+// So: actually integrate it. Analytic ray/sphere entry and exit, ten steps of
+// exponential-density single scattering, Rayleigh phase plus a Mie forward lobe,
+// and a cylindrical shadow test so the night limb goes dark. It only ever
+// shades the planet's own screen area, so ten steps is affordable.
+//
+// Everything is done in VIEW space, taking the planet centre straight from
+// modelViewMatrix — no camera-position uniform to keep in sync, and immune to
+// the planet group's rotation.
+function makeAtmosphereMaterial(color, density, R, Ra) {
   return new THREE.ShaderMaterial({
     uniforms: {
       atmoColor: { value: color },
       density: { value: density },
       sunDir: { value: new THREE.Vector3(0, 1, 0) },   // planet-local, set by the system
+      uR: { value: R },
+      uRa: { value: Ra },
     },
     vertexShader: /* glsl */`
-      varying vec3 vNormal;
-      varying vec3 vViewPos;
-      varying vec3 vObjNormal;
+      uniform vec3 sunDir;
+      varying vec3 vPosView;
+      varying vec3 vCenView;
+      varying vec3 vSunView;
       void main() {
-        vNormal = normalMatrix * normal;
-        vObjNormal = normal;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vViewPos = mv.xyz;
+        vPosView = mv.xyz;
+        vCenView = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        // planet-local → view: the group is rotation-only, so normalMatrix is
+        // exactly the rotation we need
+        vSunView = normalize(normalMatrix * sunDir);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */`
       uniform vec3 atmoColor;
       uniform float density;
-      uniform vec3 sunDir;
-      varying vec3 vNormal;
-      varying vec3 vViewPos;
-      varying vec3 vObjNormal;
+      uniform float uR;
+      uniform float uRa;
+      varying vec3 vPosView;
+      varying vec3 vCenView;
+      varying vec3 vSunView;
+
       void main() {
-        vec3 n = normalize(vNormal);
-        vec3 v = normalize(-vViewPos);
-        float rim = pow(1.0 - abs(dot(n, v)), 3.3);
-        // glow belongs to the day side
-        float lit = clamp(dot(normalize(vObjNormal), sunDir) * 0.8 + 0.42, 0.04, 1.0);
-        gl_FragColor = vec4(atmoColor, 1.0) * rim * lit * density * 0.85;
+        vec3 d = normalize(vPosView);
+        vec3 p = -vCenView;                 // camera, relative to planet centre
+        float camR = length(p);
+
+        // Inside the atmosphere the look belongs to the sky dome and to the
+        // aerial-perspective term in scattering.js. Fade the shell out on
+        // entry so the two never stack into a white-out.
+        float aH = uRa - uR;
+        float outside = smoothstep(aH * 0.15, aH * 0.95, camR - uR);
+        if (outside <= 0.001) discard;
+
+        float b = dot(p, d);
+        float c0 = dot(p, p);
+        float disc = b * b - (c0 - uRa * uRa);
+        if (disc <= 0.0) discard;
+        float sq = sqrt(disc);
+        float t0 = max(-b - sq, 0.0);
+        float t1 = -b + sq;
+
+        // stop at the ground if the ray hits it
+        float discP = b * b - (c0 - uR * uR);
+        if (discP > 0.0) {
+          float tp = -b - sqrt(discP);
+          if (tp > 0.0) t1 = min(t1, tp);
+        }
+        if (t1 <= t0) discard;
+
+        const int STEPS = 10;
+        float H = (uRa - uR) * 0.28;        // scale height
+        float seg = (t1 - t0) / float(STEPS);
+        float inscat = 0.0;
+        float od = 0.0;
+        for (int i = 0; i < STEPS; i++) {
+          vec3 q = p + d * (t0 + seg * (float(i) + 0.5));
+          float qr = length(q);
+          // Normalise by the chord a grazing limb ray cuts, sqrt(2·R·h), NOT
+          // by the shell thickness — that chord is ~6x longer here, and using
+          // the thickness drove optical depth to ~4 for every limb pixel, which
+          // saturated the whole rim to flat white and then absorbed it away.
+          // This way od ≈ 1 for a limb ray, which is what the curves expect.
+          float dens = exp(-(qr - uR) / H) * seg / max(sqrt(2.0 * uR * aH), 1.0);
+          od += dens;
+          // cylindrical shadow: behind the planet AND within its radius
+          float s = dot(q, vSunView);
+          float perp = sqrt(max(qr * qr - s * s, 0.0));
+          float lit = (s < 0.0 && perp < uR) ? 0.0 : 1.0;
+          // soften the terminator rather than stepping it
+          lit *= smoothstep(-0.12, 0.10, dot(normalize(q), vSunView) + 0.06);
+          inscat += dens * lit;
+        }
+
+        float mu = dot(d, vSunView);
+        float rayleigh = 0.75 * (1.0 + mu * mu);
+        // forward lobe: the bright crescent on the sun side of the limb
+        float mie = pow(max(mu, 0.0), 12.0) * 1.9;
+
+        float amt = inscat * density * 3.2;
+        vec3 col = atmoColor * amt * (rayleigh + mie);
+        // thick paths saturate toward white — the hot band hugging the surface,
+        // while thinner paths higher up keep the atmosphere's own colour
+        col = mix(col, vec3(dot(atmoColor, vec3(0.33))) * amt * 2.2,
+                  clamp(od * 0.55, 0.0, 0.6));
+        // and warm through the terminator, where the light is grazing
+        col = mix(col, col * vec3(1.35, 0.72, 0.42),
+                  clamp(1.0 - abs(mu) * 3.0, 0.0, 1.0) * 0.45);
+
+        // transmittance: deep paths absorb what they scatter
+        col *= exp(-od * 0.35);
+
+        gl_FragColor = vec4(col * outside, 1.0);
       }`,
     side: THREE.BackSide,
     transparent: true,
