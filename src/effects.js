@@ -346,6 +346,7 @@ export class Ship {
     this.parkedPosUniv = null;
     this.parkedQuat = new THREE.Quaternion();
     this.parkAmt = 0;
+    this.portrait = false;      // hero framing for screenshots / admiring it
   }
 
   setParked(posUniv, quat) {
@@ -364,7 +365,15 @@ export class Ship {
     this.roll += (rollTarget - this.roll) * (1 - Math.exp(-dt * 5));
     _sf.set(0, 0, -1).applyQuaternion(this.smQuat);   // forward
     _su.set(0, 1, 0).applyQuaternion(this.smQuat);
-    _sv.copy(_sf).multiplyScalar(19).addScaledVector(_su, -4.6);   // formation offset
+    // formation offset — or, in portrait mode, a three-quarter hero pose
+    // close in front of the lens (the flight offset sits 13.6° below the
+    // camera axis, outside any narrow framing)
+    if (this.portrait) {
+      _sr.set(1, 0, 0).applyQuaternion(this.smQuat);
+      _sv.copy(_sf).multiplyScalar(24).addScaledVector(_su, -2.2).addScaledVector(_sr, 5.5);
+    } else {
+      _sv.copy(_sf).multiplyScalar(19).addScaledVector(_su, -4.6);
+    }
     const formQuat = _sq2.copy(this.smQuat)
       .multiply(_sq.setFromAxisAngle(_sr.set(0, 0, 1), this.roll));
 

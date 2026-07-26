@@ -940,16 +940,22 @@ window.NMS = {
   throttle(v) { spaceCtl.setThrottle(v); return spaceCtl.throttle; },
   // frame the ship for a proper look at it: narrow the lens onto the
   // formation pose (the parked ship can be 170 m away — a speck)
-  shipPortrait(fov = 17) {
+  shipPortrait(fov = 40) {
     if (walkCtl.active) walkCtl.exit();
     setState('space');
     spaceCtl.resetFlight();
     nav.vel.set(0, 0, 0);
+    ship.portrait = true;
     camera.fov = fov;
     camera.updateProjectionMatrix();
     return true;
   },
-  resetFov() { camera.fov = BASE_FOV; camera.updateProjectionMatrix(); return true; },
+  resetFov() {
+    ship.portrait = false;
+    camera.fov = BASE_FOV;
+    camera.updateProjectionMatrix();
+    return true;
+  },
   speed: () => spaceCtl.speed,
   audioStart() { ambientAudio.start(); return ambientAudio.started; },
   audioState() { return ambientAudio.state(); },
