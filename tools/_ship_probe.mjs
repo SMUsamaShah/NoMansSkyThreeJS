@@ -31,6 +31,15 @@ await page.evaluate('NMS.faceShip()');
 await shot('03-parked-closeup');
 await page.evaluate('NMS.lookYaw(35)');
 await shot('04-parked-side', 40000);
+// portrait: a narrow lens on the formation pose, where the ship is big
+await page.evaluate('NMS.teleport(0, 0.08, {horizon: true})');
+await page.evaluate('NMS.shipPortrait(16)');
+await shot('05-portrait', 60000);
+await page.evaluate('NMS.lookYaw(38)');
+await shot('06-portrait-side', 40000);
+await page.evaluate('NMS.lookYaw(38); NMS.lookPitch(-14);');
+await shot('07-portrait-top', 40000);
+await page.evaluate('NMS.resetFov()');
 const fails = await page.evaluate('NMS.stats().shaderFails');
 if (fails > 0) { errors.push(`${fails} shader program(s) failed`); console.error('SHADER FAILS:', fails); }
 console.log(errors.length ? `DONE WITH ${errors.length} ERROR(S)` : 'DONE — no errors');

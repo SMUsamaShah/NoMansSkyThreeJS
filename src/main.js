@@ -938,6 +938,18 @@ window.NMS = {
     return st ? { name: st.name, topology: st.topology, radius: Math.round(st.radius) } : null;
   },
   throttle(v) { spaceCtl.setThrottle(v); return spaceCtl.throttle; },
+  // frame the ship for a proper look at it: narrow the lens onto the
+  // formation pose (the parked ship can be 170 m away — a speck)
+  shipPortrait(fov = 17) {
+    if (walkCtl.active) walkCtl.exit();
+    setState('space');
+    spaceCtl.resetFlight();
+    nav.vel.set(0, 0, 0);
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+    return true;
+  },
+  resetFov() { camera.fov = BASE_FOV; camera.updateProjectionMatrix(); return true; },
   speed: () => spaceCtl.speed,
   audioStart() { ambientAudio.start(); return ambientAudio.started; },
   audioState() { return ambientAudio.state(); },
