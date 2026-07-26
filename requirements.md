@@ -214,7 +214,12 @@ damage each does to the illusion:
 
 **Standing method.** Look at the game before and after every change
 (`tools/lookbook.mjs` is the stable spread; `tools/harness.mjs` makes new
-probes cheap). Judge the image, not the counter.
+probes cheap). Judge the image, not the counter — and judge it *against a
+reference*, not against memory. `reference/` holds 18 frames each from Star
+Citizen and Elite Dangerous, indexed by the property each one demonstrates
+(aerial perspective, limb, eye-level ground, vegetation scale, hardware,
+sky restraint, clouds); `reference/README.md` says what to look for in each
+and which requirement it backs. Refresh with `node tools/fetch_reference.mjs`.
 
 ## 4. Engineering constraints & practices
 
