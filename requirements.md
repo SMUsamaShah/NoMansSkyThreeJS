@@ -382,30 +382,38 @@ and several performance claims are sourced to vendor blog posts.
 - Commit and push in small increments (the remote container can revert the
   working tree without warning; origin is the source of truth).
 
-## 5. Status snapshot (v0.21.0, 2026-07-16)
+## 5. Status snapshot (v0.25.0, 2026-07-27)
 
-Done and verified:
-- Seeded universe, systems, warp/manual travel, land/walk/dive/takeoff.
-- Quadtree cube-sphere terrain with geomorphed, seam-tested LOD + prefetch.
-- Volumetric clouds unified with cloud shadows/impostors; GTAO experiment.
-- Per-planet alien flora (two tree species, shrubs, glowing pods, real grass),
-  near scatter bubble + far proxy tier to ~4.5 km + canopy-tinted terrain to
-  orbit; meadow landing bias for demos.
-- Sky dome fixed (its shader had never compiled); de-halofied nebulae/band.
-- Procedural space stations (§2.6): one per system, seeded — ring/spine/
-  cross/cluster topologies, HDR window bands, blinking beacons, rotating
-  sections; HUD label; `NMS.stationVista()` for screenshots.
-- Biome ambience (§2.7): fully synthesized — space hum, wind, leaf rustle +
-  chirps, dry wind, ice shimmer + creaks, lava rumble + crackle, alien
-  murmur + bubbles, underwater muffle; starts on gesture, M mutes,
-  `?audio=0` for tests; graph verified by `tools/_audio_probe.mjs`.
-- Touch controls; desktop controls; quality-low path.
+Done and verified this pass (see §3b for the full ranked gap list):
+- **Colour space corrected.** Twelve sites were converting sRGB to linear a
+  second time on values three.js had already converted. This was the single
+  biggest defect in the project and the cause of the "childish / not AAA"
+  verdict — see §3b item 0.
+- Image-based lighting (`src/env.js`); metals are no longer black in space.
+- Aerial perspective with a sun-dependent Mie lobe (`src/scattering.js`).
+- A cinematic lens pass (`src/postfx.js`): shafts, anamorphic streak, ghosts,
+  vignette, aberration, grain.
+- Integrated single-scattering planetary limb replacing a Fresnel rim.
+- Shadows that actually land (normalBias was wider than a tree trunk).
+- Flora: smooth noise-displaced canopies, three species per world with
+  guaranteed-distinct silhouettes, rim clumps breaking the outline, triplanar
+  surface detail, muted colour.
+- Ground litter at power-law sizes; per-kind scatter reach.
+- Terrain relief in three bands (sub-metre, ~3 m, ~26 m) instead of one.
 
-Pending / next (in owner's priority order):
-1. Perceived-seamlessness polish on terrain detail resolve (§2.2).
-2. Station interiors / docking (not yet requested — confirm scope first).
-3. GTAO tuning for log-depth, then consider default-on (§2.3).
-4. three.js upgrade / WebGPU evaluation (§4).
+Tools added, all of which earned their keep by finding bugs no screenshot
+review had: `NMS.lightProbe()` (found the black albedo), `?shadow=0` (found the
+canopy patches), `?farflora=0` (found the confetti source), `NMS.vista()`,
+`tools/harness.mjs`, `tools/lookbook.mjs`, `tools/_smoke.mjs`,
+`reference/` + `tools/fetch_reference.mjs`.
+
+Pending / next (owner's priority order, detail in §3b and §3c):
+1. Far-tier confetti — spacing-bound, needs octahedral impostors.
+2. Vegetation silhouette break-up beyond rim clumps.
+3. Clouds: flat blobs with visible polygon edges.
+4. Station and ship greeble density against `reference/`.
+5. Star field magnitude/colour distribution; the HUD as an instrument.
+6. three.js upgrade / WebGPU evaluation.
 
 Known cosmetic issues (logged, not blocking): faint parallel streaks over
 horizon suns; moon landings can spawn in dense forest; ice plains featureless
