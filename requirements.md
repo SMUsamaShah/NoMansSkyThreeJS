@@ -445,7 +445,17 @@ canopy patches), `?farflora=0` (found the confetti source), `NMS.vista()`,
 `reference/` + `tools/fetch_reference.mjs`.
 
 Pending / next (owner's priority order, detail in §3b and §3c):
-1. **Coloured specks on vegetated ground seen from ~1 km up** (visible bottom
+1. ~~**Coloured specks on vegetated ground seen from ~1 km up.**~~ FIXED
+   (v0.25). Far proxies now converge on the shared canopy mix (lerp 0.62) —
+   individual species colour is not resolvable at proxy range, and letting each
+   keep its own meant a world whose alien hue drift landed on pink and cyan
+   speckled the hillside with pink and cyan dots. Converging on the aggregate
+   is what an LOD is for. Verified with `tools/_specks.mjs`: hillsides read as
+   a canopy mass with the far tier fully on (26398 proxies in reach).
+   Two earlier attempts missed because I never checked what colour the specks
+   were and assumed proxy trees were too bright, then that the ground was too
+   light. Original entry below.
+   OLD: **Coloured specks on vegetated ground seen from ~1 km up** (visible bottom
    centre-left in `screenshots/vista-atlas/03-horizon-1500m.png`). Two causes
    already fixed and neither closed it: the proxies' own over-brightening
    (1.6x → 1.06x) and the forest floor sitting lighter than the canopy on it

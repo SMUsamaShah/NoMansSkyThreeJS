@@ -314,7 +314,15 @@ function buildTree(rng, pal, canopyColor, noise, style) {
 // a ~40-triangle stand-in with the species' silhouette and colours — the far
 // tier draws thousands of these out to the horizon so a forest is a forest
 // from any altitude, not a bubble that grows around the camera
-function buildFarTree(rng, pal, style, h, canopyColor) {
+// mixColor: the weighted average of all species' canopies, the same value
+// planet.js tints the forest FLOOR with. Individual species colour is not
+// resolvable at proxy range, and letting each proxy keep its own meant a world
+// whose alien hue drift landed on pink and cyan (§2.4 requires that drift)
+// speckled the hillside with pink and cyan dots. Confirmed as the far tier by
+// tools/_specks.mjs — ?farflora=0 removes them. Pulling each proxy most of the
+// way to the shared mix is what an LOD is supposed to do: converge on the
+// aggregate as the individual stops being visible.
+function buildFarTree(rng, pal, style, h, canopyColor, mixColor) {
   const parts = [];
   const r0 = 0.06 + h * 0.03;
   const trunk = new THREE.CylinderGeometry(r0 * 0.55, r0 * 1.15, h, 5, 1);
@@ -348,7 +356,8 @@ function buildFarTree(rng, pal, style, h, canopyColor) {
   // seen from a few hundred metres reads as colour confetti instead of a
   // canopy mass. Barely lifted now, and less per-vertex jitter, so proxies
   // merge into a surface the way the far tier is supposed to.
-  paint(canopy, canopyColor.clone().multiplyScalar(1.06), rng, 0.05);
+  const farC = mixColor ? canopyColor.clone().lerp(mixColor, 0.62) : canopyColor.clone();
+  paint(canopy, farC.multiplyScalar(1.06), rng, 0.05);
   parts.push(canopy);
   return shadeVertical(mergeGeos(parts), 0.6, 1.15);
 }
@@ -491,6 +500,15 @@ export function buildFlora(planet) {
   // `rng` would shift every species decision downstream of it
   const noise = new Simplex(makeRng(planet.seed + ':flora:shape'));
   const pal = planet.floraPal || floraPalette(planet, rng);
+  // same weights farflora.js's FAR_DENSITY forest mix actually draws with, and
+  // the same blend planet.js tints the forest floor by — the two must agree or
+  // the proxies pop against the ground they stand on
+  const _c3 = pal.canopy3 || pal.canopy2;
+  const farMix = new THREE.Color(
+    pal.canopy.r * 0.44 + pal.canopy2.r * 0.32 + _c3.r * 0.24,
+    pal.canopy.g * 0.44 + pal.canopy2.g * 0.32 + _c3.g * 0.24,
+    pal.canopy.b * 0.44 + pal.canopy2.b * 0.32 + _c3.b * 0.24,
+  );
   const pod = buildPodPlant(rng, pal, noise);
   // three DIFFERENT silhouettes, drawn without replacement
   const pool = TREE_STYLES.slice();
@@ -510,8 +528,8 @@ export function buildFlora(planet) {
     // the ground tint alone made grass vanish on dark soils
     grassTint: pal.canopy.clone().offsetHSL(0, 0.02, 0.10),
     // horizon-range proxies for the far tier
-    far0: buildFarTree(rng, pal, t0.style, t0.h, pal.canopy),
-    far1: buildFarTree(rng, pal, t1.style, t1.h, pal.canopy2),
-    far2: buildFarTree(rng, pal, t2.style, t2.h, pal.canopy3 || pal.canopy2),
+    far0: buildFarTree(rng, pal, t0.style, t0.h, pal.canopy, farMix),
+    far1: buildFarTree(rng, pal, t1.style, t1.h, pal.canopy2, farMix),
+    far2: buildFarTree(rng, pal, t2.style, t2.h, pal.canopy3 || pal.canopy2, farMix),
   };
 }
