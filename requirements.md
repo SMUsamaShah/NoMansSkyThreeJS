@@ -278,7 +278,14 @@ Citizen and Elite Dangerous, indexed by the property each one demonstrates
 sky restraint, clouds); `reference/README.md` says what to look for in each
 and which requirement it backs. Refresh with `node tools/fetch_reference.mjs`.
 
-12. **Shadow-to-ambient contrast is too high.** Shadowed ground drops to
+12. ~~**Shadow-to-ambient contrast is too high.**~~ LARGELY FIXED (v0.25).
+    The measured light balance was already healthy — sun 2.75 against ambient
+    1.05, a 0.275 shadowed/lit ratio. The culprit was the baked shadow term
+    multiplying *diffuseColor* by 0.42, which darkens the surface's response to
+    every light source including the sky, which a shadow does not block. At
+    0.72 shadowed ground reads as shadowed grass rather than black. Original
+    finding kept below.
+    Shadowed ground drops to
     near-black; in `reference/star-citizen/dunboro-aerial-view-microtech.jpg`
     shadowed grass stays green and readable, because it is still lit by the
     whole sky. This is the real defect behind the big dark region on surface

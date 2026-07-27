@@ -12,9 +12,17 @@ import { injectAerial } from './scattering.js';
 // ?bakedshadow=0 lifts the terrain's baked ray-marched sun shadow to 1.0, so a
 // dark region that survives it is NOT that term. Pairs with ?shadow=0 (shadow
 // map) to bisect any dark area on the ground in two shots.
+// 0.42 was too aggressive, and aggressive in the WRONG WAY: it multiplies
+// diffuseColor, so it darkens the surface's response to *every* light source —
+// including the sky, which a shadow does not block. A shadow removes the SUN.
+// Measured on a lush meadow the light balance is already healthy (sun 2.75 vs
+// ambient 1.05, a 0.275 shadowed/lit ratio) while ground albedo is only 0.073
+// luminance, so this extra 0.42 on top was most of why shadowed ground read as
+// near-black instead of staying green and readable the way it does in
+// reference/star-citizen/dunboro-aerial-view-microtech.jpg.
 export const BAKED_SHADOW_LO = {
   value: (typeof location !== 'undefined'
-    && new URLSearchParams(location.search).get('bakedshadow') === '0') ? 1.0 : 0.42,
+    && new URLSearchParams(location.search).get('bakedshadow') === '0') ? 1.0 : 0.72,
 };
 
 // one global clock drives water and wind everywhere
