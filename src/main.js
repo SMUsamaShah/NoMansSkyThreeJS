@@ -46,6 +46,16 @@ const FREEZE = qs.get('freeze') === '1';
 const QUALITY_LOW = qs.get('quality') === 'low';
 if (QUALITY_LOW) setGridCells(18);
 
+// ?hud=0 hides every overlay. Needed for the blind A/B comparator: our HUD
+// identifies our frame on sight, so a judge shown it is not comparing
+// rendering at all. Cropping it away was not enough — text survived the crop
+// in four of five pairs, which the judge noticed and said so.
+if (qs.get('hud') === '0') {
+  const css = document.createElement('style');
+  css.textContent = '#hud,#target-card,#altitude,#labels,#bottom,#crosshair,'
+    + '#stats,#version,#touch-ui,#throttle{display:none !important}';
+  document.head.appendChild(css);
+}
 document.getElementById('version').textContent = 'v' + VERSION;
 console.info(`No Man's Sky three.js v${VERSION}`);
 
