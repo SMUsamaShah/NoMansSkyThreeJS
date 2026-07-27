@@ -45,7 +45,10 @@ const CAPS = {
   default: 2000,
 };
 // props that spawn several per cell rather than one
-const COPIES = { grass: 4, rock: 6, boulder: 2 };
+const COPIES = { grass: 22, rock: 6, boulder: 2 };
+// per-kind reach in cells (default RANGE). Short reach + many copies = dense
+// cover where it reads, nothing wasted at a distance where a blade is subpixel.
+const REACH = { grass: 9 };
 
 // ONE size distribution, shared by the near bubble and the far proxy tier.
 // A uniform draw made every tree the same tree; this biases toward small so a
@@ -62,6 +65,12 @@ export const FAR_TREE_S1 = 2.3;
 // max random lie-angle (radians): stone is dropped, not planted
 const TILTS = { rock: 0.9, boulder: 0.55 };
 export function capFor(kind) { return CAPS[kind] ?? CAPS.default; }
+// Radius (metres) inside which a kind is guaranteed fully faded in, so its
+// props must persist bit-identically across rebuilds. Beyond it the grow-in
+// fade is legitimately anchor-dependent. Exported so the walk-stability test
+// derives this from the real reach instead of hardcoding one number for every
+// kind — which silently became wrong the moment kinds stopped sharing a range.
+export function stableRadiusM(kind) { return Math.max(0, (REACH[kind] || RANGE) - 6) * CELL_M; }
 const SHOW_BELOW_ALT = 600;  // metres
 
 const _v = new THREE.Vector3();
@@ -325,9 +334,7 @@ export class Scatter {
     // props near the range edge grow in instead of popping in
     const dot = Math.min(1, Math.max(-1, _up.dot(_anchor)));
     const cells = Math.acos(dot) / cellAng;
-    let edge = Math.min(1, Math.max(0, ((RANGE - 1) - cells) / 5));
-    if (edge < 0.03) return;
-    edge = edge * edge * (3 - 2 * edge);
+    if (cells > RANGE - 1) return;
 
     const hgt = p.height(_up, p.fullMaxFreq);
     const recipe = RECIPES[p.biomeAt(_up, hgt)];
@@ -340,6 +347,17 @@ export class Scatter {
     const [kind, , s0, s1] = chosen;
     const im = this.meshes[kind];
     if (!im || counts[kind] >= capFor(kind)) return;
+
+    // Per-kind reach. Grass was spread over the full 216 m at one tuft per
+    // ~100 m², which is not ground cover, it is decoration. Real engines put
+    // real blades in a tight ring only and let the terrain colour carry the
+    // field beyond it (§2.4's albedo hand-off already does the carrying). So
+    // grass gets a short reach and many more tufts per cell: the same instance
+    // budget, spent where the eye can actually resolve a blade.
+    const reach = REACH[kind] || RANGE;
+    let edge = Math.min(1, Math.max(0, ((reach - 1) - cells) / 5));
+    if (edge < 0.03) return;
+    edge = edge * edge * (3 - 2 * edge);
 
     // cell-local tangent frame, derived from the canonical direction
     if (Math.abs(_up.y) < 0.93) _ce1.set(-_up.z, 0, _up.x).normalize();

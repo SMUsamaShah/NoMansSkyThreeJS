@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { Planet, TYPES } from '../src/planet.js';
 import { flushChunkQueue, pendingChunks } from '../src/quadtree.js';
-import { Scatter, capFor } from '../src/scatter.js';
+import { Scatter, capFor, stableRadiusM } from '../src/scatter.js';
 import { FarFlora } from '../src/farflora.js';
 
 const dir = new THREE.Vector3();
@@ -177,7 +177,10 @@ for (const type of Object.keys(TYPES)) {
         for (const [k, pos] of prev.map) {
           const da = Math.hypot(pos[0] - prevCam.x, pos[1] - prevCam.y, pos[2] - prevCam.z);
           const db = Math.hypot(pos[0] - cam.x, pos[1] - cam.y, pos[2] - cam.z);
-          if (da > 110 || db > 110) continue;     // safely inside both ranges
+          // safely inside both ranges, per kind (grass reaches far less far
+          // than a tree, on purpose — see REACH in scatter.js)
+          const lim = Math.min(110, stableRadiusM(k.slice(0, k.indexOf(':'))));
+          if (da > lim || db > lim) continue;
           tot++;
           if (!cur.map.has(k)) miss++;
         }
