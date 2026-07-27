@@ -172,8 +172,12 @@ export class SpaceControls {
     if (braking) this.setThrottle(this.throttle * Math.exp(-dt * 6));
     this.boosting = !!(keys.ShiftLeft || keys.ShiftRight);
 
-    // cruise target: throttle × altitude-scaled speed, boost on shift
-    const cruise = this.throttle * this.speedScale * 14 * (this.boosting ? 3.5 : 1);
+    // cruise target: throttle × an altitude-aware speed limiter. The cap is
+    // "cross the remaining altitude in no less than ~3 s", so approaching a
+    // world slows you automatically instead of letting full throttle
+    // overshoot the planet between two frames. Boost punches through it.
+    const cruiseMax = Math.min(1.5e6, Math.max(30, this.speedScale * 0.6));
+    const cruise = this.throttle * cruiseMax * (this.boosting ? 3.5 : 1);
     _f.set(0, 0, -1).applyQuaternion(nav.quat);
 
     // split velocity into along-heading and lateral parts: the engines pull
@@ -200,7 +204,7 @@ export class SpaceControls {
       nav.quat.multiply(_q.setFromAxisAngle(Z_AXIS, -roll * dt * 1.1)).normalize();
     }
 
-    const maxV = this.speedScale * 60;
+    const maxV = cruiseMax * 4.5;
     if (nav.vel.length() > maxV) nav.vel.setLength(maxV);
     nav.pos.addScaledVector(nav.vel, dt);
     this.speed = nav.vel.length();
