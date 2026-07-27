@@ -204,10 +204,48 @@ damage each does to the illusion:
    specular from the environment map, so the ship's shadow side was
    arithmetically zero — the hero object was a black paper cutout in every
    space frame. See `src/env.js`.
-2. ~~**Nothing casts a contact shadow.**~~ FIXED in v0.22. `shadow.normalBias`
-   was a flat 2.0 m — wider than a whole trunk — so every prop pushed its own
-   shadow off itself, and the shadow box wasted 2048 texels on ±300 m. Trees
-   floated. Box now fits view distance; bias tracks texel size.
+2. **Nothing casts a contact shadow.** Declared FIXED in v0.22 — it was not, and
+   the v0.22 entry is kept below because the half-fix is instructive. Re-opened
+   and (mostly) closed in v0.26 after looking at an actual frame: on a barren
+   world, `screenshots/rocks-before/01-ground.png` shows ~30 boulders on bright
+   sand and **not one cast shadow anywhere in the image**. Props were flat
+   cutouts pasted on the ground.
+   The v0.22 fix was real but addressed only one of the two biases.
+   `shadow.bias` is NOT a world offset: `getShadow()` does `shadowCoord.z +=
+   shadowBias`, and on an *orthographic* shadow camera z is linear over
+   near..far, so the constant `-0.0002` meant `-0.0002 * (far - near)` metres of
+   "count this as lit" slack. With the 8.4 km depth bracket that was **1.7 m**;
+   after v0.23 tightened the bracket it was still **0.5 m** — deeper than most
+   props are tall, so the ground under every stone, shrub and trunk tested as
+   lit. v0.26 asks for the bias in centimetres and divides by the live depth
+   span (~3 cm). Lesson, and it is the same one as §3b 0: **a normalised
+   parameter whose scale depends on another parameter is a bug waiting for
+   someone to change the other parameter.**
+   Two things came with it. three.js does not fade a directional shadow at its
+   box boundary, which is why the box was pushed out to a ±150 m floor to hide
+   the hard line in the distance — costing exactly the resolution contact
+   shadows need. `patchShadowEdgeFade()` (src/shaders.js) fades the shadow to
+   1.0 over the outer fifth of the box in the shared `ShaderChunk`, so the floor
+   could drop to 90 m (0.088 m/texel, twice the detail). It dovetails with
+   `planet.sunVis`, whose ray-march starts at 70 m. And the GTAO pass now
+   reconstructs view positions correctly under the logarithmic depth buffer —
+   see item 2b.
+   ORIGINAL (v0.22): `shadow.normalBias` was a flat 2.0 m — wider than a whole
+   trunk — so every prop pushed its own shadow off itself, and the shadow box
+   wasted 2048 texels on ±300 m. Box now fits view distance; bias tracks texel
+   size.
+2b. ~~**GTAO is off because "the log depth buffer skews it at distance".**~~
+   FIXED in v0.26 — and the diagnosis in that sentence was too generous. GTAO
+   pushes the raw depth texel through `cameraProjectionMatrixInverse`, which
+   assumes a standard depth buffer. Ours stores `log2(1 + w) / log2(far + 1)`,
+   and with `near = 0.12`, `far = 3.2e9` that inversion maps **every** pixel to
+   ~0.13 m in front of the eye whatever its real depth: not skewed at distance,
+   wrong everywhere, so the pass could never have worked. Both `GTAOShader` and
+   the `PoissonDenoiseShader` behind it now keep the inverse projection for the
+   ray *direction* and get the distance by inverting three.js's log mapping
+   exactly (`main.js: patchAOForLogDepth`). Radius is 1.2 m, not 3 m: a
+   post-process blend multiplies the *lit* colour, so a wide radius at strength
+   dims sunlit ground, which is not what AO does.
 3. ~~**No aerial perspective.**~~ FIXED in v0.22. Fog density was 1e-5 above
    2.5 km: an 8% wash over a 30 km vista. Mountains 30 km out arrived as
    saturated as the ground underfoot and the world read diorama-sized. See
@@ -428,9 +466,20 @@ and several performance claims are sourced to vendor blog posts.
 - Commit and push in small increments (the remote container can revert the
   working tree without warning; origin is the source of truth).
 
-## 5. Status snapshot (v0.25.0, 2026-07-27)
+## 5. Status snapshot (v0.26.0, 2026-07-27)
 
-Done and verified this pass (see §3b for the full ranked gap list):
+Done and verified in v0.26 (see §3b items 2 and 2b for the detail):
+- **Scattered props cast contact shadows again.** `shadow.bias` is a normalised
+  depth offset on an orthographic shadow camera, so the constant `-0.0002` was
+  half a metre of "count this as lit" slack — deeper than most props are tall.
+  Verified against a frame, not an argument: `screenshots/rocks-before/` has
+  ~30 boulders and zero shadows.
+- **The shadow box fades at its boundary** (`patchShadowEdgeFade`), which is why
+  it could be tightened from a ±150 m floor to ±90 m — twice the texel density.
+- **GTAO works under the logarithmic depth buffer** and runs by default within
+  300 m of a surface, where there are props for it to occlude.
+
+Done and verified in v0.25:
 - **Colour space corrected.** Twelve sites were converting sRGB to linear a
   second time on values three.js had already converted. This was the single
   biggest defect in the project and the cause of the "childish / not AAA"

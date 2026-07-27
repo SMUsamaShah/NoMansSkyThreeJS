@@ -14,7 +14,7 @@ import { Ambience } from './audio.js';
 import { bakeNebula } from './nebula.js';
 import { EnvLighting } from './env.js';
 import { WarpStreaks, SkyDome, Ship, SpaceDust } from './effects.js';
-import { tickShaders } from './shaders.js';
+import { tickShaders, patchShadowEdgeFade } from './shaders.js';
 import { updateAerial } from './scattering.js';
 import { CinematicPass } from './postfx.js';
 import { EffectComposer } from '../vendor/jsm/postprocessing/EffectComposer.js';
@@ -22,6 +22,8 @@ import { RenderPass } from '../vendor/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from '../vendor/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
 import { GTAOPass } from '../vendor/jsm/postprocessing/GTAOPass.js';
+import { GTAOShader } from '../vendor/jsm/shaders/GTAOShader.js';
+import { PoissonDenoiseShader } from '../vendor/jsm/shaders/PoissonDenoiseShader.js';
 import { UI } from './ui.js';
 import { clamp, lerp, smoothstep } from './noise.js';
 import { makeWord, systemName } from './names.js';
@@ -72,6 +74,9 @@ renderer.toneMappingExposure = 1.1;
 // mapping off, it is albedo or normals, not self-shadowing.
 renderer.shadowMap.enabled = qs.get('shadow') !== '0';
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// three.js leaves a hard line where the shadow box ends; this fades it. Must
+// run before any material compiles — it edits a shared ShaderChunk.
+patchShadowEdgeFade();
 document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -99,6 +104,9 @@ sunShadow.shadow.camera.near = 100;
 sunShadow.shadow.camera.far = 8500;
 sunShadow.shadow.camera.left = sunShadow.shadow.camera.bottom = -300;
 sunShadow.shadow.camera.right = sunShadow.shadow.camera.top = 300;
+// Both biases are set per-frame in the update below, in METRES — see there for
+// why a constant `bias` is a bug on an orthographic shadow camera whose depth
+// span changes.
 sunShadow.shadow.bias = -0.0002;
 sunShadow.shadow.normalBias = 2.0;
 scene.add(sunShadow, sunShadow.target);
@@ -111,19 +119,70 @@ const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, 
   samples: IS_TOUCH ? 2 : 4, type: THREE.HalfFloatType,
 }));
 composer.addPass(new RenderPass(scene, camera));
-// EXPERIMENTAL ?gtao=1: ground-truth ambient occlusion for contact shadows
-// on cliffs and props. Off by default: the logarithmic depth buffer skews
-// its view-space reconstruction at distance — evaluate before trusting.
-if (qs.get('gtao') === '1' && !QUALITY_LOW) {
-  const gtaoPass = new GTAOPass(scene, camera, 1, 1);
+// ---- ambient occlusion ------------------------------------------------------
+// GTAO reconstructs a view-space position from the depth buffer by pushing the
+// raw depth texel through cameraProjectionMatrixInverse. That assumes a
+// STANDARD depth buffer. We render with logarithmicDepthBuffer, where the texel
+// is log2(1 + w) / log2(far + 1) instead — and with near = 0.12 and far = 3.2e9
+// that inversion collapses the whole scene to ~0.13 m in front of the eye,
+// whatever it really is. Not "skewed at distance": wrong everywhere, which is
+// why this pass has been parked behind a flag since it landed.
+//
+// Both the AO shader and the Poisson denoise that follows it do the same thing,
+// so both get the same treatment: keep the inverse projection for the RAY
+// DIRECTION through the pixel (that part is correct and cheap), and get the
+// DISTANCE along it by inverting three.js's log mapping exactly.
+function patchAOForLogDepth(shaderDef) {
+  if (shaderDef.__logDepthPatched) return shaderDef;
+  shaderDef.__logDepthPatched = true;
+  shaderDef.uniforms.logDepthFC = { value: 1 };
+  shaderDef.fragmentShader = shaderDef.fragmentShader
+    .replace('uniform mat4 cameraProjectionMatrixInverse;',
+      `uniform mat4 cameraProjectionMatrixInverse;
+       uniform float logDepthFC;   // log2( cameraFar + 1 )`)
+    .replace('vec4 clipSpacePosition = vec4(vec3(screenPosition, depth) * 2.0 - 1.0, 1.0);',
+      'vec4 clipSpacePosition = vec4(screenPosition * 2.0 - 1.0, -1.0, 1.0);')
+    .replace('vec4 viewSpacePosition = cameraProjectionMatrixInverse * clipSpacePosition;',
+      `vec4 viewSpacePosition = cameraProjectionMatrixInverse * clipSpacePosition;
+       vec3 rayDir = viewSpacePosition.xyz / viewSpacePosition.w;
+       rayDir /= max(-rayDir.z, 1e-9);                 // ray with viewZ = -1
+       float wDist = exp2(depth * logDepthFC) - 1.0;   // three.js log depth, inverted`)
+    .replace('return viewSpacePosition.xyz / viewSpacePosition.w;',
+      'return rayDir * wDist;');
+  return shaderDef;
+}
+
+// ?gtao=1 (or ?gtao=0 to force off). Default: on wherever it can matter — i.e.
+// once the shadow-casting sun has taken over near a surface. In space every
+// pixel is either sky or one convex hull, so a full extra normal pass buys
+// nothing there and costs a second draw of the scene.
+const GTAO_FLAG = qs.get('gtao');
+let gtaoPass = null;
+if (GTAO_FLAG !== '0' && !QUALITY_LOW) {
+  patchAOForLogDepth(GTAOShader);
+  patchAOForLogDepth(PoissonDenoiseShader);
+  gtaoPass = new GTAOPass(scene, camera, 1, 1);
   gtaoPass.output = GTAOPass.OUTPUT.Default;
+  // 1.2 m, not 3 m: at prop scale this has to read as CONTACT occlusion — the
+  // darkening in the last half-metre where a trunk meets the ground — not as a
+  // general grubbiness over every terrain hollow. The blend multiplies the lit
+  // colour (a post pass cannot tell sun from sky), so a wide radius at full
+  // strength dims sunlit ground too, which is not what AO does.
   gtaoPass.updateGtaoMaterial({
-    radius: 3.0, distanceExponent: 1.2, thickness: 1.5,
-    scale: 1.15, samples: 12, distanceFallOff: 1,
+    radius: 1.2, distanceExponent: 1.0, thickness: 0.6,
+    scale: 1.0, samples: 9, distanceFallOff: 1,
   });
-  gtaoPass.blendIntensity = 0.85;
+  gtaoPass.blendIntensity = 0.6;
+  // camera.far never changes, so this is a one-off
+  const logFC = Math.log2(camera.far + 1);
+  gtaoPass.gtaoMaterial.uniforms.logDepthFC.value = logFC;
+  gtaoPass.pdMaterial.uniforms.logDepthFC.value = logFC;
+  gtaoPass.enabled = false;   // driven per-frame by shadowBlend (see the loop)
   composer.addPass(gtaoPass);
 }
+// ?gtao=1 forces it on everywhere (for A/B); otherwise it runs only near a
+// surface, where there are props for it to occlude.
+const GTAO_ALWAYS = GTAO_FLAG === '1';
 // threshold above 1.0: only genuinely HDR pixels bloom (sun, lava, engines,
 // specular glints) — daytime sky must NOT veil the terrain
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), IS_TOUCH ? 0.35 : 0.5, 0.4, 1.05);
@@ -902,6 +961,14 @@ function frame() {
   // which is exactly what the lens needs to place its shafts and flare
   cinematic.update(dt, universe.system.sunGroup ? universe.system.sunGroup.position : null);
 
+  // AO costs a second draw of the whole scene into a normal buffer, so it only
+  // runs where there is something for it to occlude: within a couple of hundred
+  // metres of the ground. A 1.2 m occlusion radius is sub-pixel from higher up,
+  // and the normal prepass does not run the props' grow-in vertex scale, so
+  // staying out of the 400–600 m fade band avoids a phantom-geometry mismatch
+  // as well.
+  if (gtaoPass) gtaoPass.enabled = GTAO_ALWAYS || (shadowBlend > 0.5 && nearestAlt < 300);
+
   // sun → shadow-light crossfade (after updateRelative, which sets intensities)
   sunShadow.visible = shadowBlend > 0.02;
   if (sunShadow.visible) {
@@ -919,10 +986,19 @@ function frame() {
     // The floor was 70 m, which gave lovely contact shadows and put a HARD
     // EDGE 70 m from the camera: three.js does not fade a directional shadow at
     // its box boundary, so terrain simply stops being shadowed in a straight
-    // line across the frame. 150 m still resolves at 0.146 m/texel on a 2048
-    // map — ample for a tree — and moves the boundary out past the busy near
-    // field where the eye was catching it.
-    const half = clamp(150 + nearestAlt * 1.4, 150, 900);
+    // line across the frame. It was pushed to 150 m to move that line out past
+    // the busy near field — which bought quiet at the price of half the texel
+    // density, i.e. at the price of the thing the box exists for.
+    // The floor is back down to 90 m, because the hard edge that forced
+    // it out no longer exists: patchShadowEdgeFade() fades the shadow
+    // to 1.0 over the outer fifth of the box. 90 m resolves at 0.088 m/texel on
+    // a 2048 map — twice the detail, which is the difference between a tree
+    // trunk casting two blurred texels and casting a readable shadow. Long-range
+    // shadowing is the baked ray-marched term's job (planet.sunVis), and the two
+    // dovetail almost exactly: sunVis starts marching at t = 70 m, and the map's
+    // fade runs 0.72..0.995 of 90 m, i.e. 65 m to 89 m. Terrain shadowing is
+    // covered end to end with a 24 m overlap and no gap.
+    const half = clamp(90 + nearestAlt * 1.4, 90, 900);
     const sc = sunShadow.shadow.camera;
     if (Math.abs(sc.right - half) > half * 0.08) {
       sc.left = sc.bottom = -half;
@@ -940,9 +1016,21 @@ function frame() {
       sc.far = SHADOW_LIGHT_DIST + margin;
       sc.updateProjectionMatrix();
     }
+    // ---- the two biases, both expressed in METRES -------------------------
     // normalBias must track texel size — it was a flat 2.0 m, wider than a
     // whole trunk, so every prop shoved its own shadow off itself.
-    sunShadow.shadow.normalBias = (half * 2 / SHADOW_MAP) * 1.7;
+    const texel = half * 2 / SHADOW_MAP;
+    sunShadow.shadow.normalBias = texel * 1.1;
+    // And `bias`, which is where the flora's contact shadows were actually
+    // going. It is NOT a world offset: getShadow() does `shadowCoord.z +=
+    // shadowBias` and for an orthographic shadow camera z is linear over
+    // near..far, so a constant -0.0002 is -0.0002 * (far - near) METRES of
+    // "count this as lit" slack. With the depth bracket at ±1250 m that was
+    // HALF A METRE — deeper than most of the props are tall, so the ground
+    // under every stone, shrub and trunk tested as lit and nothing on this
+    // planet had a contact shadow. (Before the bracket was tightened it was
+    // 1.7 m, so this has never worked.) Ask for centimetres and convert.
+    sunShadow.shadow.bias = -Math.max(0.02, texel * 0.5) / (sc.far - sc.near);
 
     sysLight.intensity *= 1 - shadowBlend;
     if (universe.fadingSystem) universe.fadingSystem.sunLight.intensity *= 1 - shadowBlend;
@@ -1143,6 +1231,31 @@ window.NMS = {
     focusPlanet = p; spaceCtl.focus = p;
     ui.setTarget(p, nav.pos.distanceTo(p.posUniv));
     return true;
+  },
+  // What the shadow map is ACTUALLY set to, in metres. `shadow.bias` is a
+  // normalised depth offset, so reading it off the light tells you nothing
+  // about whether a 30 cm trunk can cast onto the ground 30 cm below it —
+  // which is the question. biasM/normalBiasM are the numbers that answer it.
+  shadowProbe() {
+    const sc = sunShadow.shadow.camera;
+    let casters = 0, instances = 0;
+    scene.traverse((o) => {
+      if (!o.castShadow || !o.isMesh || o.visible === false) return;
+      casters++;
+      instances += o.isInstancedMesh ? o.count : 1;
+    });
+    return {
+      on: renderer.shadowMap.enabled && sunShadow.visible,
+      blend: +shadowBlend.toFixed(3),
+      halfM: sc.right, mapSize: SHADOW_MAP,
+      texelM: +(sc.right * 2 / SHADOW_MAP).toFixed(4),
+      depthSpanM: Math.round(sc.far - sc.near),
+      // the two that decide whether a contact shadow survives
+      biasM: +(sunShadow.shadow.bias * (sc.far - sc.near)).toFixed(4),
+      normalBiasM: +sunShadow.shadow.normalBias.toFixed(4),
+      casters, instances,
+      gtao: !!(gtaoPass && gtaoPass.enabled),
+    };
   },
   // Why is a frame the colour it is? Guessing at this from screenshots burned
   // a lot of time; this reports what each light path is ACTUALLY contributing

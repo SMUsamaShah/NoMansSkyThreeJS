@@ -29,6 +29,40 @@ export const BAKED_SHADOW_LO = {
 export const TIME = { value: 0 };
 export function tickShaders(dt) { TIME.value += dt; }
 
+// ---------------------------------------------------------------------------
+// Directional shadows that fade at the box boundary.
+//
+// three.js does NOT fade a directional shadow at the edge of its shadow camera:
+// getShadow() tests `inFrustum` and returns a hard 1.0 outside it. That is why
+// the shadow box could not be tightened — a tight box gives lovely contact
+// shadows and then draws a STRAIGHT LINE across the frame where terrain simply
+// stops being shadowed. The box was pushed out to a ±150 m floor to hide the
+// line in the distance, which cost the resolution that contact shadows need.
+//
+// Fading the shadow toward 1.0 over the outer fifth of the box removes the
+// line, and with it the reason to keep the box big. The long-range shadowing
+// the map can no longer reach is already carried by the terrain's baked
+// ray-marched sun shadow (vMat.z above), which works to the horizon.
+//
+// This patches the shared ShaderChunk once, so every material that receives a
+// directional shadow gets it — terrain, props, ship, station — without a
+// per-material onBeforeCompile.
+let _shadowFadePatched = false;
+export function patchShadowEdgeFade() {
+  if (_shadowFadePatched) return;
+  const src = THREE.ShaderChunk.shadowmap_pars_fragment;
+  // the FIRST of the two occurrences is getShadow()'s; getPointShadow()'s
+  // (which we never use — no point light casts) must stay untouched
+  const tail = 'return mix( 1.0, shadow, shadowIntensity );';
+  const i = src.indexOf(tail);
+  if (i < 0) { console.warn('shadow edge fade: getShadow() tail not found'); return; }
+  THREE.ShaderChunk.shadowmap_pars_fragment = src.slice(0, i)
+    + 'vec2 shadowEdge = abs( shadowCoord.xy - 0.5 ) * 2.0;\n'
+    + '\t\tshadow = mix( shadow, 1.0, smoothstep( 0.72, 0.995, max( shadowEdge.x, shadowEdge.y ) ) );\n\t\t'
+    + src.slice(i);
+  _shadowFadePatched = true;
+}
+
 let _detailTex = null;
 let _detailData = null;   // kept for CPU-side sampling (cloud transit fog)
 
