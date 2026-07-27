@@ -645,9 +645,13 @@ function ambience(dt) {
       tsh.uniforms.uMistColor.value.copy(_sky).multiplyScalar(1.06);
     }
 
-    // the environment map now carries sky irradiance too, so the hemisphere
-    // light backs off to the same total rather than double-lighting the ground
-    hemi.intensity = inAtmo * 0.62 * (0.12 + 0.88 * day);
+    // The hemisphere light was cut to 0.62x when image-based lighting arrived,
+    // on the assumption the env map would make up the difference. It does not:
+    // measured against a daylight vista, terrain facing away from the sun went
+    // very nearly black, which is what too little ambient looks like. Back up,
+    // and environmentIntensity set explicitly rather than left at its default.
+    hemi.intensity = inAtmo * 1.0 * (0.12 + 0.88 * day);
+    scene.environmentIntensity = 1.0 + inAtmo * 0.35;
     hemi.color.copy(p.skyColorLin || _sky);
     hemi.groundColor.copy(p.pal.land[Math.min(2, p.pal.land.length - 1)].c);
 
@@ -668,7 +672,10 @@ function ambience(dt) {
     aerialP.sunColor.copy(_horC).lerp(_warmD.setRGB(1.0, 0.78, 0.5), 0.55)
       .multiplyScalar(skyStrength * 2.2);
     aerialP.sunDirWorld.copy(sunDir);
-    aerialP.density = envUnderwater ? 0 : Math.min(inAtmo, 1) * 6.0e-5;
+    // 6e-5 put mid-range hills fully into haze by 5 km, where
+    // reference/star-citizen/dunboro-aerial-view-microtech.jpg still has green
+    // at that distance and only goes blue on the far ridges.
+    aerialP.density = envUnderwater ? 0 : Math.min(inAtmo, 1) * 4.2e-5;
     // thin planets need a thin slab: scale height tracks the atmosphere shell,
     // not Earth's 8.5 km (these worlds are 30–90 km across)
     aerialP.scaleHeight = Math.max(400, p.atmoHeight * 0.45);
@@ -708,7 +715,9 @@ function ambience(dt) {
   // candela-scale: with physical decay, ~2 units of intensity is invisible —
   // a real lamp needs tens of candela to paint a pool on the ground
   headlamp.intensity = state === 'walk' && day < 0.4 ? (0.4 - day) * 80 : 0;
-  ambient.intensity = 0.09 + inAtmo * 0.24;   // fill so cast shadows aren't pitch black
+  // hemi + env are physical (sky above, ground bounce below); this flat blue
+  // fill mostly just tints everything, so it leans on them instead
+  ambient.intensity = 0.09 + inAtmo * 0.14;
   envInAtmo = inAtmo;
   envDay = day;
   // hand the sun over to the shadow-casting light near the ground
@@ -1092,6 +1101,100 @@ window.NMS = {
     nav.vel.set(0, 0, 0);
     horizonQuat(best, seaward, nav.quat);
     nav.quat.multiply(_q.setFromAxisAngle(_v3.set(1, 0, 0), -0.32));
+    focusPlanet = p; spaceCtl.focus = p;
+    ui.setTarget(p, nav.pos.distanceTo(p.posUniv));
+    return true;
+  },
+  // Hover over LAND, in daylight, looking out across relief.
+  //
+  // teleport() aims at scenicDir, which on an ocean world happily parks you
+  // over open water, and land()'s 'meadow' bias does the opposite of what a
+  // landscape shot needs: it stands you in a clearing facing the tree line, so
+  // the frame fills with flora and the terrain disappears — often on a slope
+  // facing away from the sun, which is why those frames came out dim and blue.
+  //
+  // This picks ground that is sunlit, dry, vegetated AND has something worth
+  // looking at within a few km, then puts the camera above it facing the
+  // relief with the sun over the shoulder. Framed after
+  // reference/star-citizen/dunboro-aerial-view-microtech.jpg.
+  vista(i, altM = 220, pitchDeg = -11) {
+    const p = universe.system.planets[i];
+    if (!p) return false;
+    tweens.length = 0;
+    spaceCtl.resetFlight();
+    if (walkCtl.active) walkCtl.exit();
+    setState('space');
+    const sunDir = p.sunDirLocal.clone();
+    const cand = new THREE.Vector3(), probe = new THREE.Vector3();
+    const a1 = new THREE.Vector3(), a2 = new THREE.Vector3();
+    const best = new THREE.Vector3(); let bestScore = -Infinity, bestH = 0;
+    const frame = (u, e1, e2) => {
+      if (Math.abs(u.y) < 0.93) e1.set(u.z, 0, -u.x).normalize();
+      else e1.set(0, -u.z, u.y).normalize();
+      e2.crossVectors(u, e1);
+    };
+    const N = 1600;
+    for (let k = 0; k < N; k++) {
+      const y = 1 - (2 * (k + 0.5)) / N;
+      const rr = Math.sqrt(Math.max(0, 1 - y * y)), ga = k * 2.399963229728653;
+      cand.set(Math.cos(ga) * rr, y, Math.sin(ga) * rr).normalize();
+      const lit = cand.dot(sunDir);
+      if (lit < 0.55) continue;                          // sun well up, not a dim raking dusk
+      const h = p.height(cand, 128);
+      if (p.hasLiquid && h < p.seaLevel + 25) continue;  // dry land, off the shore
+      const b = p.biomeAt(cand, h);
+      let sc = (b === 'forest' || b === 'grass' || b === 'dryland') ? 14
+        : (b === 'snow' || b === 'sand' || b === 'rock' || b === 'regolith') ? 5 : -10;
+      sc += lit * 4;
+      // relief within a few km: a flat plain to the horizon is a dull frame
+      frame(cand, a1, a2);
+      let relief = 0;
+      for (let j = 0; j < 6; j++) {
+        const ang = (j / 6) * Math.PI * 2, d = 3000 / p.R;
+        probe.copy(cand).addScaledVector(a1, Math.cos(ang) * d)
+          .addScaledVector(a2, Math.sin(ang) * d).normalize();
+        relief = Math.max(relief, Math.abs(p.height(probe, 128) - h));
+      }
+      sc += Math.min(relief / 120, 9);
+      // and stand somewhere ABOVE its surroundings — a vantage, not a pit
+      let ringAvg = 0;
+      for (let j = 0; j < 6; j++) {
+        const ang = (j / 6) * Math.PI * 2 + 0.5, d = 2200 / p.R;
+        probe.copy(cand).addScaledVector(a1, Math.cos(ang) * d)
+          .addScaledVector(a2, Math.sin(ang) * d).normalize();
+        ringAvg += p.height(probe, 128);
+      }
+      sc += Math.min((h - ringAvg / 6) / 90, 8);
+      if (sc > bestScore) { bestScore = sc; best.copy(cand); bestH = h; }
+    }
+    if (bestScore === -Infinity) return false;
+    // face the most dramatic direction, preferring the sun behind us
+    frame(best, a1, a2);
+    const sunH = new THREE.Vector3().copy(sunDir).addScaledVector(best, -sunDir.dot(best));
+    if (sunH.lengthSq() > 1e-6) sunH.normalize();
+    const fwd = new THREE.Vector3(); let fBest = -Infinity;
+    for (let j = 0; j < 16; j++) {
+      const ang = (j / 16) * Math.PI * 2;
+      probe.copy(a1).multiplyScalar(Math.cos(ang)).addScaledVector(a2, Math.sin(ang)).normalize();
+      let s = 0;
+      // Foreground must FALL AWAY — the first cut maximised |height change|,
+      // which simply aimed the camera into the nearest mountain wall and
+      // filled the frame with dark rock. Open ground near, relief far.
+      for (const dd of [700, 1800]) {
+        const q = new THREE.Vector3().copy(best).addScaledVector(probe, dd / p.R).normalize();
+        s += (bestH - p.height(q, 128)) / dd * 55;
+      }
+      for (const dd of [5000, 9000]) {
+        const q = new THREE.Vector3().copy(best).addScaledVector(probe, dd / p.R).normalize();
+        s += Math.min(Math.abs(p.height(q, 128) - bestH) / dd * 30, 3);
+      }
+      s -= probe.dot(sunH) * 2.2;             // sun behind the camera lights the land
+      if (s > fBest) { fBest = s; fwd.copy(probe); }
+    }
+    nav.pos.copy(p.posUniv).addScaledVector(best, p.surfaceRadius(best) + altM);
+    nav.vel.set(0, 0, 0);
+    horizonQuat(best, fwd, nav.quat);
+    nav.quat.multiply(_q.setFromAxisAngle(_v3.set(1, 0, 0), pitchDeg * Math.PI / 180));
     focusPlanet = p; spaceCtl.focus = p;
     ui.setTarget(p, nav.pos.distanceTo(p.posUniv));
     return true;

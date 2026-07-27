@@ -18,17 +18,12 @@ await withGame({
   const planets = await g.planets();
   const lush = planets.find((p) => !p.isMoon && p.type === 'lush') || planets[0];
   const dry = planets.find((p) => !p.isMoon && (p.type === 'desert' || p.type === 'barren'));
-  const R = lush.R * 1000;
-  const alt = (m) => m / R;      // altFactor from metres
-
-  // Dunboro framing: ~220 m up, nose a little below the horizon so the far
-  // ridges and the haze band both stay in frame.
-  await g.look('01-hills-220m', `NMS.teleport(${lush.i}, ${alt(220)}, {horizon: true, pitch: -0.20})`);
-  await g.look('02-hills-600m', `NMS.teleport(${lush.i}, ${alt(600)}, {horizon: true, pitch: -0.26})`);
+  // NMS.vista() finds sunlit vegetated LAND with relief in view — teleport()
+  // aims at scenicDir, which on an ocean world parks you over open water.
+  await g.look('01-hills-220m', `NMS.vista(${lush.i}, 220, -11)`);
+  await g.look('02-hills-600m', `NMS.vista(${lush.i}, 600, -14)`);
   // flatter nose: maximum aerial perspective, horizon high in frame
-  await g.look('03-horizon-1200m', `NMS.teleport(${lush.i}, ${alt(1200)}, {horizon: true, pitch: -0.10})`);
+  await g.look('03-horizon-1500m', `NMS.vista(${lush.i}, 1500, -7)`);
   // and the dry world against daymar-122019-min.jpg
-  if (dry) {
-    await g.look('04-dry-300m', `NMS.teleport(${dry.i}, ${300 / (dry.R * 1000)}, {horizon: true, pitch: -0.18})`);
-  }
+  if (dry) await g.look('04-dry-300m', `NMS.vista(${dry.i}, 300, -12)`);
 });
