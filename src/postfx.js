@@ -82,9 +82,14 @@ void main() {
       w *= 0.93;
     }
     shafts /= float(${SHAFT_SAMPLES});
-    // fade with distance from the sun so the whole frame does not glow
+    // Clamp and fall off HARD. highlight() on a star is several units, and with
+    // a gentle falloff the shafts reached the far corner at 32% strength — so
+    // parked near a sun the rays washed the entire frame orange and space
+    // stopped being black, which §2.5 forbids outright. Rays are a local effect
+    // around the source, not a global tint.
+    shafts = min(shafts, vec3(1.2));
     float sd = length((uv - uSun) * vec2(uAspect, 1.0));
-    col += shafts * uShaft * uSunIn * exp(-sd * 1.15);
+    col += shafts * uShaft * uSunIn * exp(-sd * 3.4);
 
     // ---- anamorphic streak: a wide horizontal tap across the sun's row
     vec3 streak = vec3(0.0);
@@ -92,16 +97,19 @@ void main() {
       float t = float(i) / 10.0;
       streak += highlight(vec2(uSun.x + t * 0.38, uSun.y)) * (1.0 - abs(t));
     }
-    streak /= 11.0;
+    streak = min(streak / 11.0, vec3(1.4));
     float band = exp(-abs(uv.y - uSun.y) * 190.0)
                + exp(-abs(uv.y - uSun.y) * 26.0) * 0.28;
+    // and keep the streak near the sun horizontally too, or it becomes a bar
+    // straight across the frame
+    band *= exp(-abs(uv.x - uSun.x) * 1.6);
     col += streak * band * uFlare * uSunIn * vec3(0.62, 0.78, 1.0);
 
     // ---- ghosts: internal reflections stepping through the optical centre
     vec2 axis = (vec2(0.5) - uSun);
     for (int i = 1; i <= 3; i++) {
       float s = float(i) * 0.62;
-      vec3 gh = highlight(uSun + axis * (1.0 + s));
+      vec3 gh = min(highlight(uSun + axis * (1.0 + s)), vec3(1.0));
       float fall = 1.0 / (1.0 + float(i) * 1.6);
       col += gh * fall * uFlare * 0.35 * uSunIn
            * vec3(1.0 - 0.2 * float(i), 0.85, 0.7 + 0.16 * float(i));
