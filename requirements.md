@@ -245,7 +245,14 @@ damage each does to the illusion:
    structure. It blows to flat white and stays there. OPEN.
 8. **Clouds are flat blobs with visible polygon edges.** A straight seam cuts
    through the deck at altitude — a plane edge showing through. OPEN.
-9. **Near-field ground is an untextured colour ramp.** Partly addressed. The foreground metre of
+9. ~~**Ground is an untextured colour ramp.**~~ Largely addressed. Two relief
+   bands were missing, not one: sub-metre grain inside 25 m (the metre a
+   standing player looks down at), and ~26 m relief from 160 m out to a couple
+   of km. The existing normal perturbation ran at ~3 m, which is sub-pixel past
+   a few hundred metres and averaged away to nothing, so every hill between
+   100 m and 2 km shaded like a smooth shell. That was much of why vistas read
+   soft next to daymar-122019-min.jpg, where erosion texture is legible at
+   every range. The two bands hand over rather than stack. The foreground metre of
    a surface frame — the part closest to the eye — is the emptiest part of the
    image. OPEN.
 10. **The star field is uniform dots.** Real skies have a steep magnitude

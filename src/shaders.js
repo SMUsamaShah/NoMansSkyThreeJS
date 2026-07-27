@@ -330,6 +330,28 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
           vec3 tang = normalize(cross(normal, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
           vec3 bitn = cross(normal, tang);
           normal = normalize(normal + (tang * gx + bitn * gy) * uDetailK * (1.7 + vMat.x * 1.5));
+          // Mid-range relief. The perturbation above runs at uDetailS.y (~3 m),
+          // which is sub-pixel past a few hundred metres and averages away to
+          // nothing — so every hill between 100 m and a couple of km shaded
+          // like a smooth shell, which is most of why our vistas read soft next
+          // to reference/star-citizen/daymar-122019-min.jpg, where erosion
+          // texture is legible at every range. This works at ~26 m, fading IN
+          // where the fine octave fades out, so the two hand over rather than
+          // stack.
+          {
+            float md = length(vAerialView);
+            float mk = smoothstep(40.0, 160.0, md) * (1.0 - smoothstep(2200.0, 5000.0, md));
+            if (mk > 0.002) {
+              float e2 = 2.6;
+              float mx = triDetail(vLocalPos + vec3(e2, 0.0, 0.0), wN, uDetailS.x, 0)
+                       - triDetail(vLocalPos - vec3(e2, 0.0, 0.0), wN, uDetailS.x, 0);
+              float my = triDetail(vLocalPos + vec3(0.0, e2, 0.0), wN, uDetailS.x, 0)
+                       - triDetail(vLocalPos - vec3(0.0, e2, 0.0), wN, uDetailS.x, 0);
+              vec3 mt = normalize(cross(normal, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
+              normal = normalize(normal + (mt * mx + cross(normal, mt) * my) * mk * 1.9);
+            }
+          }
+
           // matching sub-metre relief up close, so near ground catches the low
           // sun in grazing highlights instead of shading like a painted plane
           float nk = 1.0 - smoothstep(4.0, 20.0, length(vAerialView));
@@ -345,7 +367,7 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
     // a mountainside instead of using the camera's height everywhere
     injectAerial(shader, 'length(vLocalPos) - uPlanetR');
   };
-  material.customProgramCacheKey = () => 'terrain-palette-v6';
+  material.customProgramCacheKey = () => 'terrain-palette-v7';
 }
 
 // Living water: scrolling normal perturbation, plus Beer–Lambert depth
