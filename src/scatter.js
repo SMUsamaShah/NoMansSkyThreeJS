@@ -38,17 +38,17 @@ const RANGE = 24;            // cells of radius around the camera
 // that saturates its cap renders an anchor-dependent subset, which shows
 // up as props sliding around while you walk
 const CAPS = {
-  grass: 10000, shrub: 2600, tree0: 1500, tree1: 1500, tree2: 1500, pod: 1200,
+  grass: 20000, shrub: 2600, tree0: 1500, tree1: 1500, tree2: 1500, pod: 1200,
   // stone litters at several per cell now, so its ceiling has to clear the
   // densest mineral biome in range or rocks visibly slide around as you walk
   rock: 6000, boulder: 2200,
   default: 2000,
 };
 // props that spawn several per cell rather than one
-const COPIES = { grass: 22, rock: 6, boulder: 2 };
+const COPIES = { grass: 40, rock: 6, boulder: 2 };
 // per-kind reach in cells (default RANGE). Short reach + many copies = dense
 // cover where it reads, nothing wasted at a distance where a blade is subpixel.
-const REACH = { grass: 9 };
+const REACH = { grass: 8 };
 
 // ONE size distribution, shared by the near bubble and the far proxy tier.
 // A uniform draw made every tree the same tree; this biases toward small so a
@@ -121,7 +121,7 @@ const FLORA_KINDS = ['tree0', 'tree1', 'tree2', 'shrub', 'pod', 'grass'];
 // we did not.
 const RECIPES = {
   grass:    [['grass', 0.7, 0.9, 1.7], ['shrub', 0.09, 0.7, 1.4], ['tree0', 0.025, 0.5, 1.9], ['tree2', 0.025, 0.5, 1.8], ['pod', 0.02, 0.8, 1.4], ['rock', 0.12, 0.10, 1.5]],
-  forest:   [['tree0', 0.22, 0.5, 2.3], ['tree1', 0.16, 0.45, 2.0], ['tree2', 0.12, 0.5, 2.1], ['shrub', 0.14, 0.8, 1.5], ['grass', 0.2, 0.8, 1.5], ['rock', 0.12, 0.10, 1.8]],
+  forest:   [['tree0', 0.22, 0.5, 2.3], ['tree1', 0.16, 0.45, 2.0], ['tree2', 0.12, 0.5, 2.1], ['shrub', 0.12, 0.8, 1.5], ['grass', 0.30, 0.9, 1.7], ['rock', 0.08, 0.10, 1.8]],
   snow:     [['tree1', 0.03, 0.45, 2.0], ['tree2', 0.02, 0.45, 1.9], ['rock', 0.30, 0.10, 2.2], ['boulder', 0.07, 0.45, 1.8]],
   sand:     [['cactus', 0.04, 0.7, 1.5], ['shrub', 0.02, 0.5, 1.0], ['rock', 0.34, 0.08, 1.9], ['boulder', 0.04, 0.45, 1.9]],
   rock:     [['rock', 0.46, 0.10, 2.0], ['boulder', 0.12, 0.5, 2.1]],
@@ -177,7 +177,14 @@ function floraEmissive(mat) {
   mat.customProgramCacheKey = () => (key ? key.call(mat) : '') + '-flora';
 }
 // self-light per flora kind (keeps vegetation readable in shadow; pods glow)
-const FLORA_GLOW = { tree0: 0.16, tree1: 0.16, tree2: 0.16, shrub: 0.14, pod: 0.55, grass: 0.09 };
+// Fake translucency. Measured: tree0's darkest vertex colour is 0.08 luminance,
+// yet its canopy showed near-black patches — so those were SHADOW, not albedo.
+// With the sun overhead the cap shadows the clumps hanging under its rim, and
+// ambient there is about 16% of direct, which lands at black. Real foliage is
+// rescued by light passing THROUGH the leaves; we do not simulate that, so this
+// stands in for it. It is the reason this knob exists — it was just set far too
+// low to do the job.
+const FLORA_GLOW = { tree0: 0.34, tree1: 0.34, tree2: 0.34, shrub: 0.26, pod: 0.55, grass: 0.14 };
 
 export class Scatter {
   constructor() {
@@ -205,7 +212,7 @@ export class Scatter {
       applyWindSway(mat, SWAY[kind] || 0);   // 0 sway still wires the grow scale
       // stone gets it too, at a tighter scale: an untextured boulder is the
       // same flat-plastic problem as an untextured canopy
-      applyFloraDetail(mat, { fine: 9.0, coarse: 2.4, amount: 0.42, relief: 2.2 });
+      applyFloraDetail(mat, { fine: 9.0, coarse: 2.4, amount: 0.42, relief: 0.7 });
       chainAerial(mat);
       this.addMesh(planet, kind, GEO[kind], mat);
     }

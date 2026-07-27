@@ -522,7 +522,12 @@ export function applyFloraDetail(material, opts = {}) {
   const fine = opts.fine ?? 5.5;      // ~18 cm — leaf clumps, bark grain
   const coarse = opts.coarse ?? 1.5;  // ~65 cm — branch masses, trunk swelling
   const amt = opts.amount ?? 0.34;
-  const relief = opts.relief ?? 1.5;
+  // 1.5 was nearly four times the terrain's equivalent, and on a small rim
+  // clump — a 0.4 m sphere sampled at 0.18 m feature scale — the perturbation
+  // exceeded the base normal and flipped it, which renders as hard black
+  // patches across the canopy. Relief has to stay well under the normal it
+  // is bending.
+  const relief = opts.relief ?? 0.45;
   const prev = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
     if (prev) prev.call(material, shader, renderer);

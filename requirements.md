@@ -213,7 +213,22 @@ damage each does to the illusion:
    desaturating or re-tinting flora: that was tried, and since planet.js
    blends floraPal.canopy into the terrain's forest tint it drained the
    landscape further.
-6. **Vegetation silhouettes do not break up.** Canopies are smooth solids with
+5c. **UNRESOLVED: hard dark patches on 'cap'-style canopies.** Visible on the
+   large foreground trees in screenshots/flora-close/01-meadow.png. Ruled out
+   by measurement or by direct test, in order: clump/cap intersection showing
+   DoubleSide backfaces (moved clumps outside the rim — no change); the flora
+   detail's normal relief flipping normals (1.5 to 0.45 — no change); the cap
+   underside darkening floor (0.55 to 0.74 — no change); dark vertex colour
+   (measured — tree0's darkest vertex is 0.08 luminance, so the patches are
+   NOT albedo); and raising FLORA_GLOW (no change, and the reason is now
+   known: floraEmissive multiplies emissive by vColor, so 0.34 on a 0.08
+   canopy contributes 0.027 — that knob cannot lift shadowed foliage as
+   written). Remaining suspicion is self-shadowing from the shadow map at
+   clump scale versus the terrain-tuned normalBias. Next step is to bisect it
+   with ?post=0 and shadows disabled rather than guess again.
+6. **Vegetation silhouettes do not break up.** Partly addressed — canopies now
+   carry rim clumps and scalloped lathes, so the outline is overlapping masses
+   rather than one arc. Still far from needle-level break-up. Canopies are smooth solids with
    scalloped rims; SC conifers dissolve into needles at the outline. This is a
    geometry/instancing problem, not a shader one, and is the remaining
    structural gap on vegetation.

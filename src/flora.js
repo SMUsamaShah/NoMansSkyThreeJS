@@ -233,11 +233,40 @@ function buildTree(rng, pal, canopyColor, noise, style) {
     {
       const cp = cap.attributes.position, cc = cap.attributes.color;
       for (let i = 0; i < cp.count; i++) {
-        const k = 0.55 + 0.45 * Math.sqrt(cp.getY(i) / ch);
+        // 0.55 was too deep a floor. A player stands 2 m tall under trees
+        // 5-10 m tall, so the UNDERSIDE is what is actually on screen most of
+        // the time — and combined with the cap shadowing itself it went to
+        // near-black, reading as hard dark patches punched into the canopy.
+        const k = 0.74 + 0.26 * Math.sqrt(cp.getY(i) / ch);
         cc.setXYZ(i, cc.getX(i) * k, cc.getY(i) * k, cc.getZ(i) * k);
       }
     }
     parts.push(place(cap, top.x, top.y - ch * 0.15, top.z));
+    // Break the outline properly. Scalloping the lathe ripples the edge but
+    // the silhouette is still one continuous curve, and a continuous curve is
+    // what makes a canopy read as moulded. Real foliage dissolves into
+    // separate masses at its edge — see the conifers in
+    // reference/star-citizen/microtech-01-122019-min.jpg. These are small
+    // lobes hung around and just under the rim, so the outline is made of
+    // overlapping pieces instead of one arc.
+    {
+      const nRim = 7 + (rng() * 5) | 0;
+      const _rc = new THREE.Color();
+      for (let i = 0; i < nRim; i++) {
+        const a = (i / nRim) * Math.PI * 2 + rng() * 0.7;
+        const rr = r * (0.15 + rng() * 0.14);
+        // Hug the rim from OUTSIDE. The first cut let clumps sit on top of the
+        // cap, so the cap surface poked through them — and since flora renders
+        // DoubleSide, those were backfaces with flipped normals, which showed
+        // as hard black patches across every canopy.
+        const reach = r * (0.94 + rng() * 0.22);
+        _rc.copy(canopyColor).offsetHSL((rng() - 0.5) * 0.04, 0, (rng() - 0.55) * 0.13);
+        parts.push(place(blob(rng, rr, _rc, noise, { lumps: 1.5, squash: 0.72 }),
+          top.x + Math.cos(a) * reach,
+          top.y - ch * 0.15 + ch * (0.02 + rng() * 0.22),
+          top.z + Math.sin(a) * reach));
+      }
+    }
     if (rng() < 0.6) {          // glowing spots under the cap rim
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2 + rng();
@@ -404,6 +433,21 @@ export function floraPalette(planet, rng) {
   const trunk = (planet.pal.rock || base).clone()
     .lerp(new THREE.Color(0.34, 0.24, 0.17), 0.4 + rng() * 0.25);
   const accent = new THREE.Color().setHSL(rng(), 0.85, 0.58);
+  // Same albedo floor the terrain palette gets, and for the same measured
+  // reason. tree1's vertex colours were bottoming out at 0.008 luminance with
+  // 12.7% of the mesh below 0.02 — black. Foliage starts dark, then blob()'s
+  // baked AO (0.62 floor) and shadeVertical()'s gradient (0.62 floor) multiply
+  // to 0.38, and 0.38 of an already-dark colour is nothing at all. Lift the
+  // source into real vegetation albedo (0.05-0.12 linear) so the AO passes
+  // have something to darken.
+  const lumOf = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  const lift = (c, target) => {
+    const l = lumOf(c);
+    if (l > 1e-5 && l < target) c.multiplyScalar(target / l);
+    return c;
+  };
+  lift(canopy, 0.085); lift(canopy2, 0.075); lift(canopy3, 0.080);
+  lift(trunk, 0.055);   // bark is dark, but it is not a silhouette
   return { canopy, canopy2, canopy3, trunk, accent };
 }
 
