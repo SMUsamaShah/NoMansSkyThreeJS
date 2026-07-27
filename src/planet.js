@@ -697,23 +697,29 @@ export class Planet {
     this.cloudBands = [];
     if (this.cfg.clouds > 0.05 && rand() < this.cfg.clouds) {
       const coverage = 0.3 + rand() * 0.55;
+      const cov0 = 0.55 - coverage * 0.24, cov1 = 0.86 - coverage * 0.14;
+      // (drawn here rather than after makeCloudTexture so the shadow bake can
+      // see them; makeCloudTexture takes no rng draws, so the stream is
+      // bit-identical to before and determinism is unaffected)
+      const o1 = [rand() * 7, rand() * 7, rand() * 7];
       // the visible clouds are shader-procedural (resolution-independent);
-      // this small texture only serves the terrain's cast cloud shadows
-      this.cloudShadowTex = makeCloudTexture(this.nD, coverage);
+      // this small texture only serves the terrain's cast cloud shadows, and
+      // it is BAKED FROM THE SAME FIELD (§2.3) — it used to be an unrelated
+      // simplex fbm, so the shadows on the ground had nothing to do with the
+      // clouds in the sky above them.
+      this.cloudShadowTex = makeCloudTexture(cov0, cov1, o1[0], o1[1], o1[2]);
       const cloudR = R + Math.max(this.hAmp * 1.7 + 90, R * 0.02);
       const cmat = new THREE.MeshLambertMaterial({
         color: this.type === 'toxic' ? 0xc8e890 : 0xffffff,
         transparent: true, depthWrite: false, opacity: 0.92,
       });
-      const o1 = [rand() * 7, rand() * 7, rand() * 7];
       applyCloudField(cmat, coverage, o1[0], o1[1], o1[2]);
       this.cloudMesh = new THREE.Mesh(new THREE.SphereGeometry(cloudR, 96, 64), cmat);
       this.cloudMesh.renderOrder = 2;
       this.group.add(this.cloudMesh);
       this.cloudBands.push({
         r: cloudR, mesh: this.cloudMesh, opacity: 0.92,
-        cov0: 0.55 - coverage * 0.24, cov1: 0.86 - coverage * 0.14,
-        ox: o1[0], oy: o1[1], oz: o1[2],
+        cov0, cov1, ox: o1[0], oy: o1[1], oz: o1[2],
       });
       // the second deck's dice roll ALWAYS happens (the rng stream must not
       // depend on render flags), but with volumetrics on we spend it there
@@ -727,8 +733,7 @@ export class Planet {
         const thick = Math.max(this.hAmp * 1.1, R * 0.006, 900);
         const band = {
           rIn: cloudR - thick * 0.45, rOut: cloudR + thick * 0.55,
-          cov0: 0.55 - coverage * 0.24, cov1: 0.86 - coverage * 0.14,
-          ox: o1[0], oy: o1[1], oz: o1[2],
+          cov0, cov1, ox: o1[0], oy: o1[1], oz: o1[2],
           tint: this.type === 'toxic' ? 0xc8e890 : 0xffffff,
         };
         this.volCloudMat = makeCloudVolumeMaterial(this, band, detailTexture(), 3.2e9);
@@ -1103,28 +1108,42 @@ function makeAtmosphereMaterial(color, density, R, Ra) {
   });
 }
 
-function makeCloudTexture(simplex, coverage) {
+// The terrain's cast cloud shadows, as an equirectangular map of THE coverage
+// field (§2.3) — it used to be an unrelated 6-octave simplex fbm, so the
+// shadows on the ground bore no relation to the clouds casting them, and were
+// mirrored in latitude and longitude relative to the deck's own lookup on top.
+//
+// Coverage goes in RGB with alpha left opaque. It used to go in ALPHA with RGB
+// pinned to white, and the terrain shader reads `.g` — which was therefore 1.0
+// wherever the canvas had ever been painted. "Cloud shadows" were a flat 42%
+// darkening of every lit surface on the planet with a hard binary edge, not a
+// shadow. Keeping the canvas opaque also means the softening blur below
+// composites in straight RGB instead of premultiplied alpha, where a blurred
+// white-on-transparent edge un-premultiplies back to white and stays hard.
+function makeCloudTexture(cov0, cov1, ox, oy, oz) {
   const W = 512, H = 256;
   const canvas = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
   if (!canvas) return null;
+  detailTexture();                        // the CPU twin samples its data
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(W, H);
   const d = img.data;
+  const dir = new THREE.Vector3();
   for (let j = 0; j < H; j++) {
-    const phi = (j / H - 0.5) * Math.PI;
+    // CanvasTexture flips Y on upload, so canvas row 0 is texture v=1, and the
+    // terrain shader puts v=1 at the north pole: row 0 must be +90° latitude.
+    const phi = (0.5 - (j + 0.5) / H) * Math.PI;
     const cy = Math.sin(phi), cr = Math.cos(phi);
     for (let i = 0; i < W; i++) {
-      const th = (i / W) * Math.PI * 2;
-      const cx = Math.cos(th) * cr, cz = Math.sin(th) * cr;
-      // cap octaves at the texture's own resolution: finer noise would
-      // alias into hard per-texel blocks once thresholded
-      let v = simplex.fbm(cx + 5, cy + 5, cz - 5, 4.2, 6, 0.55, 2.3, 45);
-      v = smoothstep(0.62 - coverage * 0.22, 0.88 - coverage * 0.15, v * 0.5 + 0.5);
-      v = Math.pow(v, 1.35);              // cauliflower edges, puffy cores
+      // and it reads u = 0.5 + atan2(d.z, -d.x)/2pi — inverted here so the
+      // shadow lands under the cloud rather than 180° away from it
+      const a = ((i + 0.5) / W) * Math.PI * 2 - Math.PI;
+      dir.set(-Math.cos(a) * cr, cy, Math.sin(a) * cr);
+      const v = cloudDensityCPU(dir, cov0, cov1, ox, oy, oz);
       const k = (j * W + i) * 4;
-      d[k] = d[k + 1] = d[k + 2] = 255;
-      d[k + 3] = (v * 255) | 0;
+      d[k] = d[k + 1] = d[k + 2] = (v * 255) | 0;
+      d[k + 3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -1152,6 +1171,7 @@ function makeCloudTexture(simplex, coverage) {
   ctx.drawImage(pad, P, 0, W, H, 0, 0, W, H);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.NoColorSpace;   // a coverage mask, not a colour
   return tex;
 }
 

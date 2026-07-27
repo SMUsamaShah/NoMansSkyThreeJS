@@ -78,13 +78,101 @@ export function detailTexture() {
   return _detailTex;
 }
 
-// CPU twin of the GLSL cloudFbm below — same octaves, same channels
+// ---------------------------------------------------------------------------
+// THE cloud coverage field (§2.3: one field drives the raymarched volume, the
+// impostor deck, the terrain's cast shadows and the CPU transit fog).
+//
+// It used to be a plain SUM of three axis-aligned planar projections of the
+// surface direction: d.xy, d.yz, d.zx. A linear projection restricted to the
+// sphere is 2-to-1 — it FOLDS along the great circle where the projection's
+// kernel lies in the tangent plane, and a fold is a gradient reversal, i.e. a
+// crease. Worse, the dominant octave (weight 0.5) and the finest (0.0625) both
+// projected on d.xy, so 60% of the field creased along the SAME great circle.
+// Threshold that and you get a dead-straight cloud edge on a great circle,
+// which from the ground runs from horizon to zenith to horizon: the "hard
+// vertical seam running the full height of the sky".
+//
+// Triplanar blending removes it for nothing: each chart's weight is
+// |d.axis|^3, which is exactly ZERO on that chart's own fold circle, so the
+// crease is never sampled. The cost is that a blend of independent charts has
+// LOWER variance than one chart (worst at the eight octant corners, where all
+// three weigh 1/3), which would show as eight permanently clear patches — so
+// the sum is rescaled by 1/|w|, which restores the variance exactly.
+//
+// Octave count/weights are chosen to keep the field's mean at ~0.5 and its
+// standard deviation within a few percent of the old one, so the cov0/cov1
+// thresholds every planet was seeded with still mean the same thing.
+const CF = [
+  { f: 0.55, w: 0.50, p: [0, 1, 2], a: 0.0 },
+  { f: 1.32, w: 0.28, p: [1, 2, 0], a: 2.7 },
+  { f: 3.05, w: 0.15, p: [2, 0, 1], a: -1.3 },
+  { f: 6.40, w: 0.07, p: [0, 2, 1], a: 5.9 },
+];
+const SW = ['xyz', 'yzx', 'zxy', 'xzy'];
+
+// GLSL source for the field. `lod0` forces mip level 0, which the raymarch
+// MUST do (implicit derivatives are undefined inside a divergent loop and
+// flicker); the impostor deck wants the mip chain for antialiasing from orbit.
+// Hosts must declare `uniform sampler2D uCloudNoise;` and `uniform vec3 uCOff;`.
+export function cloudFieldGLSL(lod0 = false) {
+  const tap = (uv, ch) => (lod0
+    ? `textureLod(uCloudNoise, ${uv}, 0.0).${ch}`
+    : `texture2D(uCloudNoise, ${uv}).${ch}`);
+  // one octave = the three charts, each weighted by how well it faces the
+  // surface here; the chart that would fold is weighted to zero
+  const oct = (f, O) => `(w.z * ${tap(`d.xy * ${f.toFixed(3)} + ${O}.xy`, 'g')}
+       + w.x * ${tap(`d.yz * ${f.toFixed(3)} + ${O}.yz`, 'r')}
+       + w.y * ${tap(`d.zx * ${f.toFixed(3)} + ${O}.zx`, 'g')})`;
+  const offs = CF.map((o, i) => `vec3 O${i} = uCOff.${SW[i]} + ${o.a.toFixed(3)};`).join('\n      ');
+  return /* glsl */`
+    vec3 cloudChartW(vec3 d) {
+      vec3 w = abs(d); w *= w * w;
+      return w / max(w.x + w.y + w.z, 1e-6);
+    }
+    // octave 0 on its own: the large-scale coverage. The volume's sun march
+    // uses only this — it is what actually casts a cloud-to-cloud shadow, and
+    // it costs three taps instead of twelve.
+    float cloudOct0(vec3 d) {
+      vec3 w = cloudChartW(d);
+      ${offs.split('\n')[0]}
+      return 0.5 + (${oct(CF[0].f, 'O0')} - 0.5) / max(length(w), 0.57735);
+    }
+    float cloudFbmO(vec3 d, out float o0) {
+      vec3 w = cloudChartW(d);
+      ${offs}
+      float rs = 1.0 / max(length(w), 0.57735);
+      float a0 = ${oct(CF[0].f, 'O0')};
+      o0 = 0.5 + (a0 - 0.5) * rs;
+      float f = ${CF[0].w.toFixed(3)} * a0
+        + ${CF.slice(1).map((o, i) => `${o.w.toFixed(3)} * ${oct(o.f, `O${i + 1}`)}`).join('\n        + ')};
+      return 0.5 + (f - 0.5) * rs;
+    }
+    float cloudFbm(vec3 d) { float t; return cloudFbmO(d, t); }`;
+}
+
+// CPU twin of cloudFieldGLSL — same charts, same channels, same rescale.
+// Transit fog is computed CPU-side and MUST agree with what the eye sees.
+export function cloudFbmCPU(dx, dy, dz, ox, oy, oz) {
+  const off = [ox, oy, oz];
+  let ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+  ax *= ax * ax; ay *= ay * ay; az *= az * az;
+  const s = Math.max(ax + ay + az, 1e-6);
+  const wx = ax / s, wy = ay / s, wz = az / s;
+  const rs = 1 / Math.max(Math.sqrt(wx * wx + wy * wy + wz * wz), 0.57735);
+  let f = 0;
+  for (const o of CF) {
+    const Ox = off[o.p[0]] + o.a, Oy = off[o.p[1]] + o.a, Oz = off[o.p[2]] + o.a;
+    f += o.w * (wz * sampleDetailCPU(dx * o.f + Ox, dy * o.f + Oy, 1)
+      + wx * sampleDetailCPU(dy * o.f + Oy, dz * o.f + Oz, 0)
+      + wy * sampleDetailCPU(dz * o.f + Oz, dx * o.f + Ox, 1));
+  }
+  return 0.5 + (f - 0.5) * rs;
+}
+
+// Coverage 0..1 in the impostor deck's transfer (the one the alpha and the
+// terrain's cast shadow use). `d` is a unit direction in the deck's frame.
 export function cloudDensityCPU(d, cov0, cov1, ox, oy, oz) {
-  let f = sampleDetailCPU(d.x * 0.55 + ox, d.y * 0.55 + oy, 1) * 0.5;
-  f += sampleDetailCPU(d.y * 1.15 + oy, d.z * 1.15 + oz, 0) * 0.25;
-  f += sampleDetailCPU(d.z * 2.35 + oz, d.x * 2.35 + ox, 1) * 0.125;
-  f += sampleDetailCPU(d.x * 4.8 - ox, d.y * 4.8 - oz, 0) * 0.0625;
-  f /= 0.9375;
+  const f = cloudFbmCPU(d.x, d.y, d.z, ox, oy, oz);
   const t = Math.min(1, Math.max(0, (f - cov0) / Math.max(cov1 - cov0, 1e-5)));
   const s = t * t * (3 - 2 * t);
   return Math.pow(s, 1.3);
@@ -502,13 +590,7 @@ export function applyCloudField(material, coverage, offX, offY, offZ) {
         uniform float uCamProx;
         uniform vec3 uCSun;
         varying vec3 vCDir;
-        float cloudFbm(vec3 d) {
-          float f = texture2D(uCloudNoise, d.xy * 0.55 + uCOff.xy).g * 0.5;
-          f += texture2D(uCloudNoise, d.yz * 1.15 + uCOff.yz).r * 0.25;
-          f += texture2D(uCloudNoise, d.zx * 2.35 + uCOff.zx).g * 0.125;
-          f += texture2D(uCloudNoise, d.xy * 4.8 - uCOff.xz).r * 0.0625;
-          return f / 0.9375;
-        }`)
+        ${cloudFieldGLSL(false)}`)
       .replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
         {
           vec3 nd = normalize(vCDir);
