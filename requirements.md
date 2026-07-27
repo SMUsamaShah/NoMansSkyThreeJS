@@ -220,7 +220,18 @@ damage each does to the illusion:
    smooth-shaded, occlusion baked, clustered into a crown.
 5. ~~**No lens.**~~ FIXED in v0.22 (`src/postfx.js`): sun shafts, anamorphic
    streak, ghosts, vignette, aberration, grain.
-5b. **Lush worlds render blue-grey, whatever their palette says.** OPEN, and
+5b. ~~**Lush worlds render blue-grey, whatever their palette says.**~~ RESOLVED
+   (v0.25). Verified on the exact seed and camera that showed the problem
+   (`SEED=ATLAS-7 node tools/_vista.mjs`, 220 m and 1500 m): green hills, blue
+   river, aerial perspective grading correctly to blue only on the far ridges.
+   No single fix did it — four compounding causes, in rough order of weight:
+   the double sRGB→linear conversion (§3b 0); the baked shadow multiplying
+   ALBEDO by 0.42, which crushed the sky's contribution everywhere, not just
+   in shadow (§3b 12); the hemisphere light cut to 0.62x when IBL landed; and
+   three separate blue washes all doing distance haze at once. Each looked
+   like "the" cause on its own and none of them was. Original diagnosis kept
+   below for the record.
+   OPEN, and
    the most important unsolved item. Across two seeds and every altitude, land
    arrives in a narrow blue band. Three stacked blue washes were found and cut
    (legacy FogExp2, valley mist, and the new aerial term all doing distance
