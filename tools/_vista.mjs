@@ -13,6 +13,9 @@ import { withGame } from './harness.mjs';
 await withGame({
   out: process.env.OUT || 'screenshots/vista',
   seed: process.env.SEED || 'EUCLID',
+  // hud=0 by default: this is a look-at-the-land probe and the overlay
+  // covers the very corner of the frame the near-field detail lives in
+  query: process.env.QUERY ?? 'hud=0',
   width: 1280, height: 720,
 }, async (g) => {
   const planets = await g.planets();

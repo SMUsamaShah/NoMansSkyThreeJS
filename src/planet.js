@@ -98,6 +98,23 @@ export class Planet {
     this.mountAmp = this.hAmp * (0.55 + rand() * 0.45);
     this.detailFreq = 16 + rand() * 10;
     this.detailAmp = this.hAmp * 0.16;
+    // metre-scale relief band (see height()). Angular frequency is derived
+    // from a METRIC wavelength so a 12 km moon and a 120 km world get ridges
+    // of the same physical size — an angular constant would give the moon
+    // 10x finer ridges than the giant, which is backwards.
+    //
+    // Drawn from its OWN stream, not `rand`. Taking one draw from the planet
+    // stream here would shift every draw after it — provinces, plateaus,
+    // palette jitter, cloud coverage, whether the world even has rings — so
+    // every existing seed would become a different planet and no before/after
+    // frame would be comparable. Same reason floraPal has its own stream.
+    this.microLambda = 70 + makeRng(seed + ':micro')() * 30;   // metres
+    this.microFreq = this.R / this.microLambda;
+    // relief kept proportional to its own wavelength (a 25 m rise over 80 m
+    // is a believable crest; 100 m would be a wall) and clamped so low-relief
+    // worlds don't get alpine ridges on their plains
+    this.microAmp = clamp(this.hAmp * 0.012, 6, this.microLambda * 0.32);
+    this.rillAmp = this.microAmp * 0.5;
 
     // ---- regional personality: planets are NOT the same everywhere -------
     // a very low-frequency field divides the world into provinces; each
@@ -217,16 +234,26 @@ export class Planet {
     // mountains/detail keep their first octave at every LOD (fractals cut
     // octaves internally) so the mean elevation never jumps between levels.
     // Ranges cluster into the rugged provinces instead of covering the globe.
+    // OCTAVE COUNTS, and why they are 8 and not 6. Both fractals used to stop
+    // at 6 octaves, which is a *hard* limit independent of maxFreq: on a 98 km
+    // world the finest content the ridged band could produce was ~284 m
+    // wavelength and the eroded band ~95 m, while the LOD happily builds 1.6 m
+    // cells. Everything between ~100 m and the cell was therefore pure
+    // interpolation between two distant samples — literally a smooth blob, at
+    // every LOD, on every planet. Two more octaves each fill 135/64 m and
+    // 43/20 m. They cost nothing at coarse LOD because fbm/ridged cut octaves
+    // above maxFreq themselves, so this stays a pure function of direction and
+    // every level below is bit-identical to what it was.
     const mMask = smoothstep(this.mountMaskLo, this.mountMaskHi, c) * (0.12 + 0.88 * belt);
     if (mMask > 0.002) {
-      const m = this.nB.ridged(x, y, z, this.mountFreq, 6, 0.55, 2.1, maxFreq);
+      const m = this.nB.ridged(x, y, z, this.mountFreq, 8, 0.55, 2.1, maxFreq);
       h += m * this.mountAmp * mMask;
     }
 
     {
       // eroded hillsides: rugged crests, smooth carved flanks —
       // rough in the belts, long calm plains elsewhere
-      const d = this.nC.fbmEroded(x, y, z, this.detailFreq, 6, 0.5, 2.2, maxFreq, 3.2);
+      const d = this.nC.fbmEroded(x, y, z, this.detailFreq, 8, 0.5, 2.2, maxFreq, 3.2);
       h += d * this.detailAmp * 1.25 * (0.45 + 0.55 * mMask) * (1 - this.plainsCalm * (1 - belt));
     }
 
@@ -314,6 +341,38 @@ export class Planet {
       const sp = Math.max(0, 1 - w.d * 1.45);
       if ((w.h & 7) < 3) h += sp * sp * sp * this.spikeAmp * (0.4 + (w.h % 97) / 97 * 0.6);
     }
+
+    // ---- metre-scale relief: ridgelines, rills and scree ------------------
+    // Even with eight octaves the fractal bands are gentle down here (each
+    // octave is half the last), so hillsides still arrived as smooth curves in
+    // the near field. This band is deliberately NOT a continuation of them: a
+    // ridged field tuned to a fixed METRIC wavelength (~80 m, so it means the
+    // same thing on a moon and on a gas-giant-sized world), lifting crests and
+    // cutting drainage rills into the flanks.
+    //
+    // It cannot simply be gated on `maxFreq >= microFreq`: its first octave is
+    // always evaluated by ridged(), so at a coarse cutoff it would alias
+    // full-amplitude noise into the coarse heightfield and break LOD
+    // consistency. Instead the whole band ramps in linearly across one LOD
+    // level, which the geomorph then absorbs the same way it absorbs every
+    // other level change.
+    const microK = clamp((maxFreq / this.microFreq - 1) * 1.0, 0, 1);
+    if (microK > 0.004) {
+      // crests: sharp where the ground is already rugged, muted on plains
+      const rg = this.nB.ridged(x + 5.7, y + 12.1, z - 8.3, this.microFreq, 4, 0.5, 2.4, maxFreq);
+      h += (rg - 0.34) * this.microAmp * microK * (0.3 + 0.7 * mMask);
+    }
+    // rills are 3.3x finer again and need their OWN ramp — riding on microK
+    // would have dropped a 24 m channel field onto 12 m cells at full
+    // amplitude, which is aliasing, not detail. Squared so it only ever
+    // CARVES: slopes gain drainage channels instead of gaining volume, which
+    // is what erosion actually does.
+    const rillK = clamp((maxFreq / (this.microFreq * 3.3) - 1) * 1.0, 0, 1);
+    if (rillK > 0.004) {
+      const rl = this.nC.ridged(x - 21.3, y + 4.4, z + 16.8, this.microFreq * 3.3, 3, 0.5, 2.3, maxFreq);
+      h -= rl * rl * this.rillAmp * rillK;
+    }
+
 
     return h;
   }
