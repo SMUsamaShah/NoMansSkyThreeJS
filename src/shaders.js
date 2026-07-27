@@ -217,6 +217,7 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
         varying vec4 vExtra;
         float gSnowW = 0.0;
         float gPatch = 0.0;
+        float gRock = 0.0;
         float triDetail(vec3 p, vec3 w, float s, int ch) {
           vec2 a = texture2D(uDetailTex, p.yz * s).rg;
           vec2 b = texture2D(uDetailTex, p.zx * s).rg;
@@ -231,6 +232,26 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
           vec3 nd = normalize(vLocalPos);
           float hgt = length(vLocalPos) - uPlanetR;
           float slope = 1.0 - clamp(dot(normalize(vLocalNrm), nd), 0.0, 1.0);
+
+          // ---- shared triplanar octaves, sampled ONCE up front.
+          // These used to be scattered through the block AFTER the palette, so
+          // the palette could not read them and the rock/soil boundary had no
+          // choice but to be a smooth function of slope alone. Multiplicative
+          // terms commute, so hoisting them changes nothing downstream and
+          // lets the outcrop mask, the strata blend and the roughness all
+          // share the same taps instead of paying for their own.
+          vec3 w = pow(abs(normalize(vLocalNrm)), vec3(4.0));
+          w /= (w.x + w.y + w.z);
+          float grain = (triDetail(vLocalPos, w, uDetailS.x, 0) - 0.5)
+                      + (triDetail(vLocalPos, w, uDetailS.y, 1) - 0.5) * 0.8;
+          float pch = triDetail(vLocalPos, w, 0.0035, 1)
+                      + triDetail(vLocalPos, w, 0.0012, 0) - 1.0;
+          gPatch = pch;
+          // the outcrop field: ~110 m bedrock bands broken by ~28 m mottle
+          float oct1 = triDetail(vLocalPos, w, 0.009, 0) - 0.5;
+          float oct2 = triDetail(vLocalPos, w, 0.036, 1) - 0.5;
+          float outc = oct1 * 1.3 + oct2 * 0.7;
+
           vec3 base;
           if (uHasSea > 0.5 && hgt < uT0) {
             float t = clamp(1.0 - (uT0 - hgt) / uSeaDepthSpan, 0.0, 1.0);
@@ -253,7 +274,40 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
             if (uStripeK > 0.001) base = mix(base, mix(uStripeA, uStripeB, vExtra.z), uStripeK);
             if (uExtraMode > 2.5) base *= 1.0 + (vExtra.w - 0.5) * 0.2;
             else if (uExtraMode > 0.5) base = mix(base, uExtraC, vExtra.w);
-            base = mix(base, uRockC, smoothstep(uSlopeLo, uSlopeHi, slope));
+
+            // ---- rock outcrops ------------------------------------------
+            // This was one smoothstep of slope: everything past ~38 degrees
+            // washed uniformly to rock, everything below it stayed a single
+            // flat albedo, and the boundary was a smooth contour line no
+            // hillside has ever had. Real ground exposes bedrock in ragged
+            // patches — strata break out along crests and shoulders while
+            // soil and vegetation hold on in pockets a few metres away.
+            // Pushing the slope THRESHOLD around with the outcrop field
+            // (rather than blending the two masks) is what makes the edge
+            // tear: the same slope is bare here and grassed ten metres on.
+            float span = max(uSlopeHi - uSlopeLo, 1e-3);
+            float sh = outc * span * 1.35;
+            float rk = smoothstep(uSlopeLo - sh, uSlopeHi - sh, slope);
+            // ...but the field must not be allowed to paint LEVEL ground:
+            // a threshold shifted far enough down turns a meadow into a
+            // quarry. Below roughly 15 degrees the ground holds soil no
+            // matter what the noise says.
+            rk *= smoothstep(uSlopeLo * 0.18, uSlopeLo * 0.6, slope);
+            // scoured high country goes bare regardless of slope — the
+            // altitude axis the palette ramp alone could not express, since
+            // a gradient of greens is still a gradient of greens
+            rk = max(rk, smoothstep(0.58, 0.98, t) * clamp(0.45 + outc * 2.4, 0.0, 1.0));
+            // and rock is not one flat colour either
+            vec3 rockC = uRockC * (1.0 + (oct2 * 1.6 + grain * 0.7) * 0.45);
+            base = mix(base, rockC, rk);
+            // scree: broken rock washes downslope out of every outcrop, so
+            // the rim is a gritty apron instead of a clean line. Peaks where
+            // rk is mid-transition, speckled at ~4.5 m so it survives mipping
+            // into the distance instead of turning to mush.
+            float apron = rk * (1.0 - rk) * 4.0;
+            base = mix(base, rockC, clamp(
+              apron * (triDetail(vLocalPos, w, 0.22, 1) - 0.42) * 2.4, 0.0, 0.7));
+            gRock = rk;
           }
           diffuseColor.rgb = base;
 
@@ -261,15 +315,16 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
           // valleys, kilometres beyond the realtime shadow map's reach
           diffuseColor.rgb *= mix(uBakedLo, 1.0, vMat.z);
 
-          // ---- micro grain, biome-styled
-          vec3 w = pow(abs(normalize(vLocalNrm)), vec3(4.0));
-          w /= (w.x + w.y + w.z);
-          float grain = (triDetail(vLocalPos, w, uDetailS.x, 0) - 0.5)
-                      + (triDetail(vLocalPos, w, uDetailS.y, 1) - 0.5) * 0.8;
+          // ---- micro grain, biome-styled. The strata blend now follows the
+          // per-PIXEL outcrop mask instead of vMat.x alone: vMat.x is baked
+          // from the coarse vertex slope, so bedrock banding used to appear
+          // over a whole smoothed shoulder rather than on the rock that is
+          // actually exposed. Bare rock also carries more contrast than soil.
+          float rockw = max(vMat.x, gRock);
           float strat = texture2D(uDetailTex, vec2(length(vLocalPos) * 0.055, 0.31)).r - 0.5;
-          float d = mix(grain, grain * 0.5 + strat * 1.15, vMat.x);
+          float d = mix(grain, grain * 0.5 + strat * 1.15, rockw);
           d += (triDetail(vLocalPos, w, uDetailS.y * 0.32, 0) - 0.5) * vMat.y * 0.75;
-          diffuseColor.rgb *= 1.0 + d * uDetailK;
+          diffuseColor.rgb *= 1.0 + d * uDetailK * (1.0 + rockw * 0.7);
 
           // ---- continental-scale tint drift: dry-brown swathes
           float macro = triDetail(vLocalPos, w, 0.0013, 0)
@@ -279,11 +334,11 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
 
           // ---- mid-scale patchiness (~100–500 m): soil and moisture
           // variation seen from a hilltop — the octave between micro grain
-          // and continental swathes that uniform game terrain lacks
-          float pch = triDetail(vLocalPos, w, 0.0035, 1)
-                      + triDetail(vLocalPos, w, 0.0012, 0) - 1.0;
-          gPatch = pch;
-          diffuseColor.rgb *= 1.0 + pch * (0.30 + 0.20 * vMat.z) * (0.5 + uMacroK);
+          // and continental swathes that uniform game terrain lacks.
+          // (pch is sampled at the top of the block now; bare rock does not
+          // carry soil moisture, so the tint is masked off it.)
+          diffuseColor.rgb *= 1.0 + pch * (0.30 + 0.20 * vMat.z)
+                              * (0.5 + uMacroK) * (1.0 - gRock * 0.7);
           // damp hollows darken and cool slightly
           diffuseColor.rgb = mix(diffuseColor.rgb,
             diffuseColor.rgb * vec3(0.88, 0.97, 0.92),
@@ -309,6 +364,9 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
             float sw = smoothstep(sl, sl + uSnowBand, hgt);
             sw = max(sw, smoothstep(uSnowCap, uSnowCap + 0.07, lat));
             sw *= 1.0 - smoothstep(0.55, 0.8, slope) * 0.85;
+            // snow does not lie on bare rock, so outcrops stay dark through
+            // the snowline — the thing that gives a real snowy ridge its shape
+            sw *= 1.0 - gRock * 0.65;
             diffuseColor.rgb = mix(diffuseColor.rgb, uSnowColor, sw);
             gSnowW = sw;
           }
@@ -321,8 +379,13 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
         }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         // snow glints, damp hollows go faintly glossy, dry rises stay matte —
-        // low-sun specular variation is a big part of ground reading as real
-        roughnessFactor = clamp(roughnessFactor - gSnowW * 0.42 + gPatch * 0.14, 0.05, 1.0);`)
+        // low-sun specular variation is a big part of ground reading as real.
+        // Bare rock is the one surface out here with any sheen at all: without
+        // this an outcrop and the grass beside it respond to a grazing sun
+        // identically, and the eye reads them as the same material painted two
+        // colours.
+        roughnessFactor = clamp(roughnessFactor - gSnowW * 0.42 + gPatch * 0.14
+                                - gRock * 0.22, 0.05, 1.0);`)
       .replace('#include <fog_fragment>', `
         #ifdef USE_FOG
         {
@@ -347,7 +410,9 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
                    - triDetail(vLocalPos - vec3(0.0, 0.35, 0.0), wN, uDetailS.y, 1);
           vec3 tang = normalize(cross(normal, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
           vec3 bitn = cross(normal, tang);
-          normal = normalize(normal + (tang * gx + bitn * gy) * uDetailK * (1.7 + vMat.x * 1.5));
+          // bare rock is fractured and takes far more relief than turf
+          normal = normalize(normal
+            + (tang * gx + bitn * gy) * uDetailK * (1.7 + vMat.x * 1.5 + gRock * 2.2));
           // Mid-range relief. The perturbation above runs at uDetailS.y (~3 m),
           // which is sub-pixel past a few hundred metres and averages away to
           // nothing — so every hill between 100 m and a couple of km shaded
@@ -370,6 +435,29 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
             }
           }
 
+          // FAR relief. The 26 m band is switched off past 5 km, and beyond
+          // that every ridge went back to shading like a smooth shell — which
+          // is the whole of "no high-frequency detail at ANY distance". A 26 m
+          // feature at 20 km is a fifth of a pixel, so it cannot simply be
+          // extended; the fix is one octave up. ~170 m features, fading in
+          // exactly where the mid band lets go and carried to 45 km, by which
+          // point aerial perspective owns the frame anyway. The three bands
+          // now hand over 0.35 m -> 3 m -> 26 m -> 170 m with no gap, so
+          // there is relief shading at every range a planet is visible from.
+          {
+            float fd = length(vAerialView);
+            float fk = smoothstep(1800.0, 4800.0, fd) * (1.0 - smoothstep(22000.0, 45000.0, fd));
+            if (fk > 0.002) {
+              float e3 = 17.0;
+              float fx = triDetail(vLocalPos + vec3(e3, 0.0, 0.0), wN, 0.006, 1)
+                       - triDetail(vLocalPos - vec3(e3, 0.0, 0.0), wN, 0.006, 1);
+              float fy = triDetail(vLocalPos + vec3(0.0, e3, 0.0), wN, 0.006, 1)
+                       - triDetail(vLocalPos - vec3(0.0, e3, 0.0), wN, 0.006, 1);
+              vec3 ft = normalize(cross(normal, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
+              normal = normalize(normal + (ft * fx + cross(normal, ft) * fy) * fk * 2.0);
+            }
+          }
+
           // matching sub-metre relief up close, so near ground catches the low
           // sun in grazing highlights instead of shading like a painted plane
           float nk = 1.0 - smoothstep(4.0, 20.0, length(vAerialView));
@@ -385,7 +473,7 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
     // a mountainside instead of using the camera's height everywhere
     injectAerial(shader, 'length(vLocalPos) - uPlanetR');
   };
-  material.customProgramCacheKey = () => 'terrain-palette-v8';
+  material.customProgramCacheKey = () => 'terrain-palette-v9';
 }
 
 // Living water: scrolling normal perturbation, plus Beer–Lambert depth
