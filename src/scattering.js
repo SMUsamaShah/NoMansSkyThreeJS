@@ -19,6 +19,15 @@
 
 import * as THREE from 'three';
 
+// ?aerial=0 removes this term and nothing else. Several things in this
+// renderer can fog a distant ridge — this term, the FogExp2 floor, the valley
+// mist, the cloud deck seen edge-on, and the bloom/lens pass — and §3b's
+// record is that guessing between them is wrong four or five times running.
+// Each needs its own switch. Pairs with ?post=0, ?lens=0, ?vclouds=0;
+// driven by tools/_hazebisect.mjs.
+const AERIAL_ON = (typeof location === 'undefined')
+  || new URLSearchParams(location.search).get('aerial') !== '0';
+
 export const AERIAL = {
   uAerialSunView: { value: new THREE.Vector3(0, 0, -1) },  // sun dir, VIEW space
   uAerialColor: { value: new THREE.Color(0, 0, 0) },       // cool inscatter (sky)
@@ -41,7 +50,7 @@ export function updateAerial(camera, {
   AERIAL.uAerialSunView.value.copy(_sv);
   AERIAL.uAerialColor.value.copy(color);
   AERIAL.uAerialSunCol.value.copy(sunColor);
-  AERIAL.uAerialK.value = density;
+  AERIAL.uAerialK.value = AERIAL_ON ? density : 0;
   AERIAL.uAerialH.value = scaleHeight;
   AERIAL.uAerialCamAlt.value = camAlt;
   AERIAL.uAerialR.value = planetR;
