@@ -615,7 +615,13 @@ function ambience(dt) {
       * smoothstep(-0.22, -0.04, sunElev) * inAtmo;
     _sky.lerp(_warmA.setRGB(0.55, 0.2, 0.08).multiplyScalar(Math.max(skyStrength, 0.12)), envSunset * 0.45);
 
-    let fogDensity = inAtmo * lerp(0.00005, 0.00001, clamp(nearestAlt / 2500, 0, 1)) * (0.25 + 0.75 * day);
+    // Distance haze is the AERIAL term's job now (src/scattering.js), which is
+    // sun-dependent and physically shaped. This legacy FogExp2 was a third
+    // blue wash on top of that and the valley mist, and three stacked blue
+    // overlays are why every lush world came out uniformly blue-grey no matter
+    // what its palette said. Kept only as a floor — cloud transit and the
+    // underwater case add to it separately below and still need it.
+    let fogDensity = inAtmo * lerp(0.000012, 0.000004, clamp(nearestAlt / 2500, 0, 1)) * (0.25 + 0.75 * day);
 
     // flying through a cloud deck: local density whites out the world
     const transit = p.cloudTransit ? p.cloudTransit(_v2.copy(nav.pos).sub(p.posUniv)) : 0;

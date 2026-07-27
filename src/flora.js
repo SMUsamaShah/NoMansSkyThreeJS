@@ -391,7 +391,12 @@ export function floraPalette(planet, rng) {
   // reference/elite-dangerous is this saturated: natural foliage is muted and
   // sits in a narrow value band. Alien hue drift stays — alien colour is a
   // requirement (§2.4) — but the chroma comes down and the value goes down.
-  const canopy = base.clone().offsetHSL(shift, -0.09, 0.02);
+  // Saturation used to go UP by 0.18 here, which is most of why the flora read
+  // as candy. But planet.js blends this same colour into the TERRAIN's forest
+  // tint, so cutting it to -0.09 drained the green out of whole landscapes and
+  // left every lush world reading blue-grey. Land near neutral: much less candy
+  // than +0.18, without bleaching the world it tints.
+  const canopy = base.clone().offsetHSL(shift, 0.01, 0.02);
   const canopy2 = canopy.clone().offsetHSL(0.3 + rng() * 0.35, -0.03, (rng() - 0.4) * 0.08);
   // a third species: two trees per world meant every stand was a duet, and at
   // any distance where the silhouette is all you read, a duet is a monoculture

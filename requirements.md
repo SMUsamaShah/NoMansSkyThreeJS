@@ -200,16 +200,33 @@ damage each does to the illusion:
    smooth-shaded, occlusion baked, clustered into a crown.
 5. ~~**No lens.**~~ FIXED in v0.22 (`src/postfx.js`): sun shafts, anamorphic
    streak, ghosts, vignette, aberration, grain.
-6. **The sun is a featureless white disc.** No limb darkening, no corona
+5b. **Lush worlds render blue-grey, whatever their palette says.** OPEN, and
+   the most important unsolved item. Across two seeds and every altitude, land
+   arrives in a narrow blue band. Three stacked blue washes were found and cut
+   (legacy FogExp2, valley mist, and the new aerial term all doing distance
+   haze at once) which helped only marginally — so the dominant cause is
+   elsewhere. Leading suspicion: across most terrain slopes the blue sky
+   ambient out-competes the direct sun, and the terrain albedo is dark to
+   begin with, so shadowed-facing ground dominates the frame and it is all
+   sky-coloured. Compare reference/star-citizen/dunboro-aerial-view-microtech.jpg,
+   which is warm and green at the same sun angle. Do NOT attack this by
+   desaturating or re-tinting flora: that was tried, and since planet.js
+   blends floraPal.canopy into the terrain's forest tint it drained the
+   landscape further.
+6. **Vegetation silhouettes do not break up.** Canopies are smooth solids with
+   scalloped rims; SC conifers dissolve into needles at the outline. This is a
+   geometry/instancing problem, not a shader one, and is the remaining
+   structural gap on vegetation.
+7. **The sun is a featureless white disc.** No limb darkening, no corona
    structure. It blows to flat white and stays there. OPEN.
-7. **Clouds are flat blobs with visible polygon edges.** A straight seam cuts
+8. **Clouds are flat blobs with visible polygon edges.** A straight seam cuts
    through the deck at altitude — a plane edge showing through. OPEN.
-8. **Near-field ground is an untextured colour ramp.** The foreground metre of
+9. **Near-field ground is an untextured colour ramp.** Partly addressed. The foreground metre of
    a surface frame — the part closest to the eye — is the emptiest part of the
    image. OPEN.
-9. **The star field is uniform dots.** Real skies have a steep magnitude
+10. **The star field is uniform dots.** Real skies have a steep magnitude
    distribution, colour by spectral class, and clustering. OPEN.
-10. **The HUD is a web overlay**, not an instrument: rounded rectangles and
+11. **The HUD is a web overlay**, not an instrument: rounded rectangles and
     body text floating over the world. OPEN.
 
 **Standing method.** Look at the game before and after every change
