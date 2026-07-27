@@ -148,14 +148,14 @@ function propColors(planet) {
     boulder: p.rock.clone().lerp(landMid, 0.28).multiplyScalar(1.0),
     crystal: null,
     blob: (p.blotch || p.rock).clone(),
-    cactus: new THREE.Color(0x55a04a).convertSRGBToLinear(),
+    cactus: new THREE.Color(0x55a04a),
   };
   switch (planet.type) {
     case 'toxic': base.crystal = (p.blotch || p.rock).clone().multiplyScalar(1.4); break;
-    case 'ice': base.crystal = new THREE.Color(0x9fd0f0).convertSRGBToLinear(); break;
+    case 'ice': base.crystal = new THREE.Color(0x9fd0f0); break;
     case 'exotic': base.crystal = p.land[p.land.length - 1].c.clone().multiplyScalar(1.3); break;
   }
-  if (!base.crystal) base.crystal = new THREE.Color(0xb0d8f0).convertSRGBToLinear();
+  if (!base.crystal) base.crystal = new THREE.Color(0xb0d8f0);
   return base;
 }
 

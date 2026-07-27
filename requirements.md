@@ -179,17 +179,26 @@ the absence of tells. Every item below is a tell.
 **Diagnosed from actual frames (v0.21, 2026-07-26).** Ranked by how much
 damage each does to the illusion:
 
-0. ~~**Everything was too dark to have colour.**~~ FIXED in v0.24, and it was
-   the root cause behind most of the "childish / not AAA" verdict. Measured
-   with `NMS.lightProbe()`: sun 79 degrees up, beating all ambient 5:1, and
-   the ground's linear albedo at **0.019 luminance**. Real albedos are
-   vegetation 0.05-0.12, rock 0.06-0.20, sand 0.15-0.30. The whole palette —
-   terrain AND flora — was three to ten times too dark, so the only thing in
-   any frame with colour left in it was atmospheric haze, and every lush world
-   arrived blue-grey whatever its palette said. Both palettes now carry an
-   albedo floor. **Measure before theorising: this was chased through lighting
-   balance, hemisphere intensity, flora saturation and three stacked haze
-   terms, all wrong, and ten lines of instrumentation found it at once.**
+0. ~~**Every colour in the project was converted sRGB→linear TWICE.**~~ FIXED
+   in v0.25. This one bug is behind most of the "childish / not AAA" verdict.
+   three.js ColorManagement is enabled, so `new THREE.Color(hex)` and
+   `setHSL()` already store LINEAR working values — and twelve sites then
+   called `.convertSRGBToLinear()` on top, squaring the transfer function.
+   Effects, measured: terrain land stops arrived at 0.008-0.09 luminance
+   instead of 0.09-0.33; rock at ~0.01 instead of ~0.10; sky red at 0.037
+   instead of 0.212, i.e. a sky roughly 7x over-saturated in blue. Since
+   `skyColorLin` drives the hemisphere light, the fog, the sky dome AND the
+   aerial haze colour, everything in frame was tinted by an over-blue, too-dark
+   sky while sitting on near-black ground — so the only thing left with colour
+   was haze, and every lush world arrived blue-grey whatever its palette said.
+   Removing the twelve conversions puts sky R:B at 0.21 (Earth ~0.28), rock at
+   0.087-0.111 and snow at 0.49-0.72 with no compensation of any kind. The
+   albedo "floor" added earlier was compensating for this and is now a low
+   safety net only.
+   **Two lessons, both expensive: measure before theorising — this was chased
+   through lighting balance, hemisphere intensity, flora saturation and three
+   stacked haze terms, all wrong. And when a fix needs a big magic multiplier
+   to look right, suspect a double transform rather than tuning the multiplier.**
 1. ~~**Metal is black in space.**~~ FIXED in v0.22. `scene.environment` was
    never set; a `metalness: 0.58` hull has no diffuse and gets its entire
    specular from the environment map, so the ship's shadow side was

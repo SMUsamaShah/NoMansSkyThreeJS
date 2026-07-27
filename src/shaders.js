@@ -139,7 +139,7 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
       value: mistBase * Math.min(planet.atmoDensity || 0.4, 1),
     };
     shader.uniforms.uMistH = { value: planet.hAmp * 0.12 };
-    shader.uniforms.uMistColor = { value: planet.skyColor.clone().convertSRGBToLinear() };
+    shader.uniforms.uMistColor = { value: planet.skyColor.clone() };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
@@ -381,17 +381,17 @@ export function applyWaterWaves(material, planet, waveScale = 1 / 14) {
     shader.uniforms.uTime = TIME;
     shader.uniforms.uWaveS = { value: waveScale };
     const deep = planet && planet.pal && planet.pal.sea
-      ? planet.pal.sea[0].c.clone().lerp(planet.liquidColor.clone().convertSRGBToLinear(), 0.4)
+      ? planet.pal.sea[0].c.clone().lerp(planet.liquidColor.clone(), 0.4)
       : new THREE.Color(0.02, 0.08, 0.15);
     const shallow = planet
-      ? planet.liquidColor.clone().convertSRGBToLinear().lerp(new THREE.Color(1, 1, 1), 0.3)
+      ? planet.liquidColor.clone().lerp(new THREE.Color(1, 1, 1), 0.3)
       : new THREE.Color(0.4, 0.75, 0.8);
     shader.uniforms.uDeepC = { value: deep };
     shader.uniforms.uShallowC = { value: shallow };
     // grazing angles mirror the sky instead of showing the deep diffuse —
     // without this, water toward the horizon reads as a near-black sheet
     const sky = planet && planet.skyColor
-      ? planet.skyColor.clone().convertSRGBToLinear().multiplyScalar(0.6)
+      ? planet.skyColor.clone().multiplyScalar(0.6)
       : new THREE.Color(0.25, 0.4, 0.55);
     shader.uniforms.uSkyC = { value: sky };
     shader.vertexShader = shader.vertexShader

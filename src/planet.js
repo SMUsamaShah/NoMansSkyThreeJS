@@ -491,11 +491,12 @@ export class Planet {
       }
     }
     // colors authored in sRGB, shaded in linear
-    const lin = (c) => c && c.convertSRGBToLinear();
-    for (const s of p.land) lin(s.c);
-    if (p.sea) for (const s of p.sea) lin(s.c);
-    if (p.stripes) for (const s of p.stripes) lin(s.c);
-    for (const k of ['forest', 'rock', 'snow', 'blotch', 'crevasse', 'ember']) lin(p[k]);
+    // NO conversion here. three.js ColorManagement is enabled, so
+    // new THREE.Color(hex) and setHSL() already store LINEAR working values —
+    // converting again squares the transfer function. Measured: sky red went
+    // 0.212 to 0.037, and land stops that should sit at 0.09-0.33 arrived at
+    // 0.008-0.09. That double conversion was the true source of the near-black
+    // albedo, and the albedo "floor" below was compensating for it.
 
     // ---- albedo floor -----------------------------------------------------
     // Measured with NMS.lightProbe() against a vista at 79 degrees sun
@@ -519,9 +520,10 @@ export class Planet {
       if (!c) return;
       const l = lumOf(c);
       if (l < 1e-5) return;
-      const target = Math.pow(l, 0.45) * 0.42;
-      const k = Math.max(1, target / l);
-      if (k > 1) c.multiplyScalar(k);
+      // Floor only, and low. With the double conversion gone the palette
+      // already lands in real ranges; this just rescues anything a seed drives
+      // implausibly dark. It is NOT the 3-10x compensation it used to be.
+      if (l < 0.035) c.multiplyScalar(0.035 / l);
     };
     for (const s of p.land) lift(s.c);
     if (p.sea) for (const s of p.sea) lift(s.c);
@@ -592,7 +594,7 @@ export class Planet {
     };
 
     // liquid & atmosphere colors
-    this.atmoColor = col(this.cfg.atmo).convertSRGBToLinear();
+    this.atmoColor = col(this.cfg.atmo);
     this.skyColor = col(this.cfg.sky);
     switch (this.liquid) {
       case 'water': this.liquidColor = col('#15527e'); this.liquidOpacity = 0.66; break;
@@ -725,7 +727,7 @@ export class Planet {
         };
         this.volCloudMat = makeCloudVolumeMaterial(this, band, detailTexture(), 3.2e9);
         this.volCloudMat.uniforms.uAmbC.value
-          .copy(this.skyColor.clone().convertSRGBToLinear()).multiplyScalar(0.6);
+          .copy(this.skyColor).multiplyScalar(0.6);
         this.volCloudMesh = new THREE.Mesh(
           new THREE.SphereGeometry(band.rOut, 48, 32), this.volCloudMat);
         this.volCloudMesh.renderOrder = 2;

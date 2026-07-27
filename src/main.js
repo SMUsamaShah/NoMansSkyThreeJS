@@ -605,7 +605,7 @@ function ambience(dt) {
     const sunDir = nearest.sunDirLocal || universe.system.sunDirFrom(nav.pos, _v);
     day = smoothstep(-0.22, 0.28, _up.dot(sunDir));
 
-    if (!p.skyColorLin) p.skyColorLin = p.skyColor.clone().convertSRGBToLinear();
+    if (!p.skyColorLin) p.skyColorLin = p.skyColor.clone();
     // dense atmospheres read as thicker fog, NOT as an overbright sky —
     // sky luminance stays below the bloom threshold
     skyStrength = Math.min(inAtmo, 1) * (0.035 + 0.965 * day) * 0.92;
@@ -637,7 +637,7 @@ function ambience(dt) {
     const camR = _v2.copy(nav.pos).sub(p.posUniv).length();
     if (p.hasLiquid && camR < p.seaRadius + 0.4) {
       envUnderwater = true;
-      if (!p.liquidColorLin) p.liquidColorLin = p.liquidColor.clone().convertSRGBToLinear();
+      if (!p.liquidColorLin) p.liquidColorLin = p.liquidColor.clone();
       _sky.copy(p.liquidColorLin).multiplyScalar(0.25 + 0.55 * day);
       if (p.liquid === 'lava') _sky.set(1.2, 0.25, 0.02);
       fogDensity = p.liquid === 'lava' ? 0.2 : 0.03;
