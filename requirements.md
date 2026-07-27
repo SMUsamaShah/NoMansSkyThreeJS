@@ -403,8 +403,20 @@ and several performance claims are sourced to vendor blog posts.
 - **Determinism**: generation is a pure function of the seed. Never let placement
   or species depend on camera path, draw order, or rng draw-order drift. The
   sanity suite enforces walk-stability and rebuild determinism — keep it green.
-- **No assets**: geometry, textures, and (future) audio are all generated in
-  code at runtime.
+- **No assets** — with a clarification the owner gave on 2026-07-27: *"I never
+  said not to generate assets if needed."* The rule was always about not
+  DOWNLOADING hand-made art, not about refusing to bake anything. Generating an
+  asset from code is fine even when the generation happens ahead of time and
+  the result is stored. That legitimises several things previously treated as
+  out of bounds, and they are the expensive half of §3b:
+  - offline-baked hydraulic-erosion detail heightmaps, tiled and blended in
+    (§3c item 7 — the route that was compatible with our LOD rules all along)
+  - baked octahedral impostor atlases for the far flora tier (§3c item 5)
+  - baked foliage/leaf alpha atlases for canopy silhouette break-up
+  - PMREM/BRDF LUTs and any other precomputed table
+  What stays out: downloaded or hand-authored art, and anything that breaks
+  determinism (a baked artefact must be a pure function of the seed, or be
+  seed-independent like a BRDF LUT).
 - **three.js**: currently vendored r170 (`vendor/three.module.js`); an upgrade
   to latest (r18x/WebGPU) is a future task — the owner expects modern renderer
   capabilities where they help.
