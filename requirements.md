@@ -280,6 +280,15 @@ damage each does to the illusion:
 11. **The HUD is a web overlay**, not an instrument: rounded rectangles and
     body text floating over the world. OPEN.
 
+**Measure faint artifacts, do not squint at them.** `tools/_colscan.mjs`
+averages each image column over a band and flags any column differing sharply
+from both neighbours. A "faint vertical line" chased across four frames and two
+bisections measured at under 0.7/255 — below quantisation noise, i.e. not
+there. Perceptual truth beats metrics (§3.1) for *whether something looks
+wrong*; it is useless for *what* is wrong, and at low contrast the eye invents
+structure. Bisect to find the subsystem, measure to confirm the artifact exists
+at all.
+
 **Standing method.** Look at the game before and after every change
 (`tools/lookbook.mjs` is the stable spread; `tools/harness.mjs` makes new
 probes cheap). Judge the image, not the counter — and judge it *against a

@@ -1128,11 +1128,28 @@ function makeCloudTexture(simplex, coverage) {
     }
   }
   ctx.putImageData(img, 0, 0);
-  // soften: thresholded noise leaves near-binary texels that read as hard
-  // squares from orbit; a subpixel blur turns them back into vapour
-  ctx.filter = 'blur(1.4px)';
-  ctx.drawImage(canvas, 0, 0);
-  ctx.filter = 'none';
+  // Soften: thresholded noise leaves near-binary texels that read as hard
+  // squares from orbit; a subpixel blur turns them back into vapour.
+  //
+  // But canvas blur does NOT wrap. Blurring in place sampled off-canvas at
+  // u=0 and u=W and broke the tileability the noise above goes to the trouble
+  // of preserving, leaving a discontinuity at longitude 0 — the faint vertical
+  // line down the sky in every high-altitude frame. Confirmed by elimination:
+  // it survived ?vclouds=0 and ?lens=0, so it was neither the volumetric
+  // clouds nor the lens pass. Blur a horizontally padded copy instead, with
+  // the wrapped edges drawn into the padding, then take the middle back.
+  const P = 8;
+  const pad = document.createElement('canvas');
+  pad.width = W + P * 2; pad.height = H;
+  const pctx = pad.getContext('2d');
+  pctx.drawImage(canvas, P, 0);
+  pctx.drawImage(canvas, P - W, 0);      // wrapped left edge
+  pctx.drawImage(canvas, P + W, 0);      // wrapped right edge
+  pctx.filter = 'blur(1.4px)';
+  pctx.drawImage(pad, 0, 0);
+  pctx.filter = 'none';
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(pad, P, 0, W, H, 0, 0, W, H);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   return tex;
