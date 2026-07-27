@@ -321,22 +321,34 @@ function buildFarTree(rng, pal, style, h, canopyColor) {
   trunk.translate(0, h * 0.5, 0);
   paint(trunk, pal.trunk, rng, 0.06);
   parts.push(trunk);
+  // Canopies are WIDER than their near-tier counterparts on purpose. The far
+  // tier is instance-budget bound — one proxy per 32 m cell — so at a few
+  // hundred metres up the proxies are spaced further apart than they are wide
+  // and the forest reads as discrete coloured dots. A proxy is a stand-in for
+  // several near trees anyway (that is why FAR_DENSITY is tuned per-m² rather
+  // than per-tree), so widening it makes neighbours overlap into a canopy mass
+  // for no extra instances. Roughly doubles covered area.
   let canopy;
   if (style === 'cap') {
-    canopy = new THREE.ConeGeometry(h * 0.42, h * 0.32, 7);
-    canopy.translate(0, h * 1.0, 0);
+    canopy = new THREE.ConeGeometry(h * 0.60, h * 0.34, 7);
+    canopy.translate(0, h * 0.98, 0);
   } else if (style === 'fronds') {
-    canopy = new THREE.ConeGeometry(h * 0.34, h * 0.44, 6);
+    canopy = new THREE.ConeGeometry(h * 0.50, h * 0.46, 6);
     canopy.rotateX(Math.PI);
-    canopy.translate(0, h * 1.06, 0);
+    canopy.translate(0, h * 1.04, 0);
   } else {           // orbs / tentacles read as a lumpy ball from afar
-    canopy = new THREE.IcosahedronGeometry(h * 0.36, 0);
-    canopy.scale(1, 0.82, 1);
-    canopy.translate(0, h * 1.0, 0);
+    canopy = new THREE.IcosahedronGeometry(h * 0.52, 0);
+    canopy.scale(1, 0.78, 1);
+    canopy.translate(0, h * 0.98, 0);
   }
-  // over-bright: distance fog pulls everything toward the haze colour, and
-  // canopies that match the forest-tinted ground vanish into it
-  paint(canopy, canopyColor.clone().multiplyScalar(1.6), rng, 0.09);
+  // Was multiplied by 1.6 to survive being washed out — a compensation for two
+  // things that are now fixed: distance haze was applied three times over, and
+  // the palette was 3-10x too dark. With both corrected, that over-brightening
+  // makes every proxy POP against the forest-tinted ground, so a wooded slope
+  // seen from a few hundred metres reads as colour confetti instead of a
+  // canopy mass. Barely lifted now, and less per-vertex jitter, so proxies
+  // merge into a surface the way the far tier is supposed to.
+  paint(canopy, canopyColor.clone().multiplyScalar(1.06), rng, 0.05);
   parts.push(canopy);
   return shadeVertical(mergeGeos(parts), 0.6, 1.15);
 }

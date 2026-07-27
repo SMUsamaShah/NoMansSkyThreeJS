@@ -537,8 +537,24 @@ export class Planet {
     this.flora = null;    // species geometries, built lazily on approach
     this.floraPal = floraPalette(this, makeRng(this.seed + ':flora'));
     // 0.3: enough to colour forests from orbit, while trees stay brighter
-    // than the ground they stand on (full-strength blending camouflaged them)
-    if (p.forest) p.forest = p.forest.clone().lerp(this.floraPal.canopy, 0.3);
+    // than the ground they stand on (full-strength blending camouflaged them).
+    //
+    // Blend toward the MIX of all three species, not just the first. With one
+    // species that distinction did not exist; with three it does, and tinting
+    // the ground with only species 0 left the other two reading as discrete
+    // coloured dots on a mismatched surface — a wooded slope from a few
+    // hundred metres up looked like confetti rather than canopy. Weighted the
+    // way farflora.js's FAR_DENSITY forest mix actually draws them.
+    if (p.forest) {
+      const fp = this.floraPal;
+      const c3 = fp.canopy3 || fp.canopy2;
+      const mix = new THREE.Color(
+        fp.canopy.r * 0.44 + fp.canopy2.r * 0.32 + c3.r * 0.24,
+        fp.canopy.g * 0.44 + fp.canopy2.g * 0.32 + c3.g * 0.24,
+        fp.canopy.b * 0.44 + fp.canopy2.b * 0.32 + c3.b * 0.24,
+      );
+      p.forest = p.forest.clone().lerp(mix, 0.3);
+    }
 
     // the palette as shader uniforms: the terrain fragment shader evaluates
     // the full gradient per-PIXEL, so coastlines and rock bands stay crisp

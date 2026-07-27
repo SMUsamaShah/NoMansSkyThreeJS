@@ -21,6 +21,12 @@ const TILE_M = 1024;         // metres per cache tile
 const CELL_M = 32;           // metres per proxy-tree cell (32 per tile edge)
 const RADIUS = 4.4;          // tiles of reach around the camera (~4.5 km)
 const CAP = 24000;           // per species
+// Reverted to the documented reach after a failed experiment. Lowering this to
+// hand over to the terrain tint sooner does NOT fix the speckling, because the
+// speckling is a function of DISTANCE (proxies 500-800 m away), not altitude —
+// uAltK is still 1 at 600 m up. And shortening the far range to chase it would
+// narrow §2.4's explicit "proxy trees to ~4.5 km", which is not mine to trade
+// away. See §3b 10b: this is spacing-bound and needs impostors.
 const SHOW_BELOW = 16000;    // m altitude; fade starts at 10 km
 
 // per-biome CLUMP probability per 32 m cell, then the species mix as
@@ -112,7 +118,7 @@ export class FarFlora {
       const mat = new THREE.MeshStandardMaterial({
         color: 0xffffff, vertexColors: true, roughness: 0.95, flatShading: true,
       });
-      mat.emissive.setScalar(0.22);
+      mat.emissive.setScalar(0.10);   // was another brightener stacked on the same problem
       applyFarFade(mat, { uCamL: this.uCamL, uAltK: this.uAltK });
       chainAerial(mat);
       const im = new THREE.InstancedMesh(geo, mat, CAP);
