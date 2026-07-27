@@ -25,12 +25,17 @@ const HALO_PROB = 0.10;                // halo keeps this fraction of stars
 const APPROACH_DIST = 1.2e8;
 const FADE_DIST = 1.5e8;
 
+// w = how common, lum = how bright. A real sky's defining feature is that
+// these two run OPPOSITE each other: the commonest stars are the faintest and
+// the rare hot ones carry the sky. With every star drawn at the same
+// brightness the field reads as evenly-spaced dots (§3b), which is the one
+// thing a real star field never looks like.
 const STAR_CLASSES = [
-  { c: 0xfff4e0, w: 4 },   // warm white
-  { c: 0xffd9a0, w: 3 },   // yellow-orange
-  { c: 0xffb070, w: 2 },   // orange
-  { c: 0xff8060, w: 1.2 }, // red
-  { c: 0xcfe0ff, w: 1.5 }, // blue-white
+  { c: 0xfff4e0, w: 4, lum: 1.0 },   // warm white
+  { c: 0xffd9a0, w: 3, lum: 0.55 },  // yellow-orange
+  { c: 0xffb070, w: 2, lum: 0.30 },  // orange
+  { c: 0xff8060, w: 1.2, lum: 0.13 },// red — commonest in reality, dimmest
+  { c: 0xcfe0ff, w: 1.5, lum: 2.4 }, // blue-white — rare, and it dominates
 ];
 
 const _v = new THREE.Vector3();
@@ -51,6 +56,7 @@ function makeStarPointsMaterial() {
       uniform float uPixelRatio;
       uniform float uProj;
       attribute float aSize;
+      attribute float aMag;
       varying vec3 vColor;
       varying float vBright;
       void main() {
@@ -61,9 +67,15 @@ function makeStarPointsMaterial() {
         // (radius = aSize * 3e5 m), so flying close resolves the dot into
         // the same disc the real sun mesh has when the system instantiates
         float discPx = 2.0 * 3.0e5 * aSize * uProj / dist;
-        gl_PointSize = clamp(max(2.2 * aSize, discPx), 2.2, 34.0) * uPixelRatio;
+        // brighter stars also read slightly larger, as they do through any lens
+        float sizeK = 0.82 + 0.5 * sqrt(clamp(aMag, 0.0, 3.0));
+        gl_PointSize = clamp(max(2.2 * aSize * sizeK, discPx), 1.6, 34.0) * uPixelRatio;
         // apparent magnitude falls with distance; only the very edge fades out
-        vBright = clamp(3.0e8 / dist, 0.5, 1.0)
+        // the 0.5 floor meant the faintest star was HALF the brightest — a
+        // 2:1 range where a real sky spans orders of magnitude. Intrinsic
+        // luminosity now carries it, and the distance floor drops well below
+        // that so the faint tail can actually be faint.
+        vBright = clamp(3.0e8 / dist, 0.12, 1.0) * clamp(aMag, 0.05, 2.6)
                 * (1.0 - smoothstep(1.15e9, 1.38e9, dist));
         gl_Position = projectionMatrix * mv;
       }`,
@@ -196,13 +208,17 @@ export class Universe {
       (iz + 0.12 + hashFloat(h, 2) * 0.76) * CELL,
     );
     let wsum = 0; for (const s of STAR_CLASSES) wsum += s.w;
-    let pickv = (hashFloat(h, 1) * 0.999) * wsum, color = STAR_CLASSES[0].c;
-    for (const s of STAR_CLASSES) { pickv -= s.w; if (pickv <= 0) { color = s.c; break; } }
+    let pickv = (hashFloat(h, 1) * 0.999) * wsum, color = STAR_CLASSES[0].c, lum = 1;
+    for (const s of STAR_CLASSES) { pickv -= s.w; if (pickv <= 0) { color = s.c; lum = s.lum; break; } }
+    // and a steep spread WITHIN a class: cubed, so most sit near the floor
+    const t = hashFloat(h, 0);
+    lum *= 0.22 + 1.5 * t * t * t;
     return {
       id: `${ix},${iy},${iz}`,
       ix, iy, iz, pos,
       color: new THREE.Color(color),
       radius: 2e5 + hashFloat(h, 2) * 2e5,
+      lum,
     };
   }
 
@@ -270,15 +286,18 @@ export class Universe {
     const pos = new Float32Array(list.length * 3);
     const col = new Float32Array(list.length * 3);
     const siz = new Float32Array(list.length);
+    const mag = new Float32Array(list.length);
     list.forEach((s, i) => {
       pos[i * 3] = s.pos.x; pos[i * 3 + 1] = s.pos.y; pos[i * 3 + 2] = s.pos.z;
       col[i * 3] = s.color.r; col[i * 3 + 1] = s.color.g; col[i * 3 + 2] = s.color.b;
       siz[i] = s.radius / 3e5;           // 0.66..1.33 apparent-size jitter
+      mag[i] = s.lum ?? 1;
     });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.setAttribute('aSize', new THREE.BufferAttribute(siz, 1));
+    geo.setAttribute('aMag', new THREE.BufferAttribute(mag, 1));
     if (!this.starMaterial) this.starMaterial = makeStarPointsMaterial();
     this.nearStarsMesh = new THREE.Points(geo, this.starMaterial);
     this.nearStarsMesh.frustumCulled = false;
