@@ -179,6 +179,17 @@ the absence of tells. Every item below is a tell.
 **Diagnosed from actual frames (v0.21, 2026-07-26).** Ranked by how much
 damage each does to the illusion:
 
+0. ~~**Everything was too dark to have colour.**~~ FIXED in v0.24, and it was
+   the root cause behind most of the "childish / not AAA" verdict. Measured
+   with `NMS.lightProbe()`: sun 79 degrees up, beating all ambient 5:1, and
+   the ground's linear albedo at **0.019 luminance**. Real albedos are
+   vegetation 0.05-0.12, rock 0.06-0.20, sand 0.15-0.30. The whole palette —
+   terrain AND flora — was three to ten times too dark, so the only thing in
+   any frame with colour left in it was atmospheric haze, and every lush world
+   arrived blue-grey whatever its palette said. Both palettes now carry an
+   albedo floor. **Measure before theorising: this was chased through lighting
+   balance, hemisphere intensity, flora saturation and three stacked haze
+   terms, all wrong, and ten lines of instrumentation found it at once.**
 1. ~~**Metal is black in space.**~~ FIXED in v0.22. `scene.environment` was
    never set; a `metalness: 0.58` hull has no diffuse and gets its entire
    specular from the environment map, so the ship's shadow side was
