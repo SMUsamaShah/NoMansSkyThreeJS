@@ -555,7 +555,13 @@ export class Planet {
         fp.canopy.g * 0.44 + fp.canopy2.g * 0.32 + c3.g * 0.24,
         fp.canopy.b * 0.44 + fp.canopy2.b * 0.32 + c3.b * 0.24,
       );
-      p.forest = p.forest.clone().lerp(mix, 0.3);
+      // 0.3 left the forest FLOOR noticeably lighter than the canopy standing
+      // on it, so each far proxy popped as a bright speck against it — the
+      // remaining half of the confetti after the proxies' own over-brightening
+      // was fixed. §2.4 wants the tinted terrain to carry the forest colour,
+      // so push the ground most of the way to the canopy mix and the proxies
+      // merge into a mass instead of dotting it.
+      p.forest = p.forest.clone().lerp(mix, 0.55);
     }
 
     // the palette as shader uniforms: the terrain fragment shader evaluates

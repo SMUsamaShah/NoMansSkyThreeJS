@@ -445,7 +445,20 @@ canopy patches), `?farflora=0` (found the confetti source), `NMS.vista()`,
 `reference/` + `tools/fetch_reference.mjs`.
 
 Pending / next (owner's priority order, detail in §3b and §3c):
-1. Far-tier confetti — spacing-bound, needs octahedral impostors.
+1. **Coloured specks on vegetated ground seen from ~1 km up** (visible bottom
+   centre-left in `screenshots/vista-atlas/03-horizon-1500m.png`). Two causes
+   already fixed and neither closed it: the proxies' own over-brightening
+   (1.6x → 1.06x) and the forest floor sitting lighter than the canopy on it
+   (tint lerp 0.3 → 0.55, kept, since §2.4 wants the tinted terrain carrying
+   the forest colour regardless).
+   **New observation that changes the suspect: the specks are saturated PINK
+   and CYAN, not canopy green.** That is accent colour, not foliage —
+   `floraPalette.accent` is `setHSL(rng(), 0.85, 0.58)`, fully saturated, and
+   pods carry `FLORA_GLOW 0.55` emissive on top. Near-tier scatter is meant to
+   be off above `SHOW_BELOW_ALT = 600`, so either that cutoff is not holding or
+   an accent-coloured element is reaching the far tier.
+   **Bisect before theorising: `?farflora=0` isolates the far tier in one
+   frame.** Do not attempt a fourth guess without it.
 2. Vegetation silhouette break-up beyond rim clumps.
 3. Clouds: flat blobs with visible polygon edges.
 4. Station and ship greeble density against `reference/`.
