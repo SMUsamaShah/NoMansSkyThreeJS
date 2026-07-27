@@ -348,8 +348,13 @@ export function makeStation(seed, name) {
   const rng = makeRng(seed);
   const hue = rng();
   const pal = {
-    light: new THREE.Color().setHSL(hue, 0.06 + rng() * 0.08, 0.58 + rng() * 0.12),
-    dark: new THREE.Color().setHSL(hue, 0.1, 0.22 + rng() * 0.08),
+    // Was lightness 0.58-0.70 and nearly desaturated: a near-white hull that
+    // read as flat plastic and blew past the bloom threshold in full sun, so
+    // none of the panel plating survived. §2.8 records the ship being fixed the
+    // same way — titanium, not white paint. Darker and slightly warmer here
+    // lets the seams, vents and hazard markings actually show.
+    light: new THREE.Color().setHSL(hue, 0.05 + rng() * 0.07, 0.36 + rng() * 0.10),
+    dark: new THREE.Color().setHSL(hue, 0.1, 0.15 + rng() * 0.07),
     accent: new THREE.Color().setHSL((hue + 0.35 + rng() * 0.3) % 1, 0.7, 0.45),
     panel: new THREE.Color(0.06, 0.12, 0.22),
     warm: new THREE.Color(1.0, 0.82, 0.55),

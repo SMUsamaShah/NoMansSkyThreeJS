@@ -152,7 +152,12 @@ export class CinematicPass extends Pass {
         // FRACTION OF THE SCREEN at the corner, not a pixel count. 0.006 puts
         // the split near a pixel where it belongs; anything in the tenths
         // smears the frame edge into a rainbow.
-        uCA: { value: opts.ca ?? 0.006 },
+        // 0.006 puts a ~2 px split at the corner, which is fine on a gradient
+        // and destructive on a STAR: a 2 px point separates completely into a
+        // red dot and a blue dot, and the whole star field turned into coloured
+        // confetti. Sub-pixel is the only safe setting when the scene contains
+        // point-sized highlights.
+        uCA: { value: opts.ca ?? 0.002 },
         // applied in HDR linear, where a night sky sits around 0.01 — grain
         // that looks timid on a 0..255 scale is deafening down here
         uGrain: { value: opts.grain ?? 0.006 },
