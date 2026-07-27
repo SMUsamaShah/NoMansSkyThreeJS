@@ -7,11 +7,22 @@
 import * as THREE from 'three';
 import { makeRng } from './rng.js';
 import { Simplex } from './noise.js';
+import { foliageUV, FOLIAGE_OPAQUE_UV } from './shaders.js';
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 const Y = new THREE.Vector3(0, 1, 0);
+
+// aLeaf, the per-vertex kind flag the flora material branches on:
+//   SOLID — trunk, lobe, cap. Opaque uv, ordinary normals.
+//   BLADE — an alpha-cut plane that is genuinely flat (a frond, a grass
+//           blade). Gets the mask's baked leaf shading; keeps its own normal,
+//           because for a real flat blade the DOUBLE_SIDED flip is correct.
+//   CARD  — an alpha-cut quad standing edge-out of a canopy, carrying the
+//           canopy's outward normal instead of its own. Also needs the
+//           DOUBLE_SIDED flip cancelled (see applyFoliageCards).
+const LEAF = { SOLID: 0, BLADE: 1, CARD: 2 };
 
 // paint a solid (slightly dithered) vertex color onto a geometry
 function paint(geo, color, rng, jitter = 0.08) {
@@ -32,7 +43,17 @@ function place(geo, x, y, z, quat = null, s = 1) {
   return geo;
 }
 
-// merge geometries (indexed or triangle-soup) that all carry position+color
+// Tag a part before merging: which atlas cell its uvs land in, and what kind
+// of surface it is. `null` cell means "solid" — mergeGeos points every vertex
+// at the atlas's opaque block, so one alphaMap can serve a whole plant.
+function tag(geo, cell, leaf = LEAF.SOLID) {
+  geo.userData.uvCell = cell;
+  geo.userData.leaf = leaf;
+  return geo;
+}
+
+// merge geometries (indexed or triangle-soup) that all carry position+color,
+// carrying uv (remapped into the foliage atlas) and the aLeaf kind flag
 function mergeGeos(list) {
   let vTotal = 0, iTotal = 0;
   for (const g of list) {
@@ -41,12 +62,35 @@ function mergeGeos(list) {
   }
   const pos = new Float32Array(vTotal * 3);
   const col = new Float32Array(vTotal * 3);
+  const uvs = new Float32Array(vTotal * 2);
+  const leaf = new Float32Array(vTotal);
+  const nrm = new Float32Array(vTotal * 3);
+  // ranges whose authored normals must survive computeVertexNormals: foliage
+  // cards deliberately carry the CANOPY's normal, not the quad's own
+  const keep = [];
   const idx = new Uint32Array(iTotal);
   let vo = 0, io = 0;
   for (const g of list) {
     pos.set(g.attributes.position.array, vo * 3);
     col.set(g.attributes.color.array, vo * 3);
     const n = g.attributes.position.count;
+    const cell = g.userData.uvCell;
+    const kind = g.userData.leaf || LEAF.SOLID;
+    const guv = g.attributes.uv;
+    for (let i = 0; i < n; i++) {
+      leaf[vo + i] = kind;
+      if (cell && guv) {
+        const m = foliageUV(cell, guv.getX(i), guv.getY(i));
+        uvs[(vo + i) * 2] = m[0]; uvs[(vo + i) * 2 + 1] = m[1];
+      } else {
+        uvs[(vo + i) * 2] = FOLIAGE_OPAQUE_UV[0];
+        uvs[(vo + i) * 2 + 1] = FOLIAGE_OPAQUE_UV[1];
+      }
+    }
+    if (kind === LEAF.CARD && g.attributes.normal) {
+      nrm.set(g.attributes.normal.array, vo * 3);
+      keep.push(vo, n);
+    }
     if (g.index) {
       const gi = g.index.array;
       for (let i = 0; i < gi.length; i++) idx[io + i] = gi[i] + vo;
@@ -61,8 +105,16 @@ function mergeGeos(list) {
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  out.setAttribute('aLeaf', new THREE.BufferAttribute(leaf, 1));
   out.setIndex(new THREE.BufferAttribute(idx, 1));
   out.computeVertexNormals();
+  const on = out.attributes.normal.array;
+  for (let k = 0; k < keep.length; k += 2) {
+    const s = keep[k], c = keep[k + 1];
+    on.set(nrm.subarray(s * 3, (s + c) * 3), s * 3);
+  }
+  out.attributes.normal.needsUpdate = true;
   return out;
 }
 

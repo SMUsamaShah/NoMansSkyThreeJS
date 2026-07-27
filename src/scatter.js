@@ -107,6 +107,8 @@ function baseGeo() {
   };
 }
 let GEO = null;
+// for tools/_geostats.mjs: the mineral geometries, built on demand
+export function baseGeoStats() { return (GEO ||= baseGeo()); }
 const FLORA_KINDS = ['tree0', 'tree1', 'tree2', 'shrub', 'pod', 'grass'];
 
 // per-biome prop recipes: [kind, density 0..1, minScale, maxScale]

@@ -577,6 +577,17 @@ export function applyFloraDetail(material, opts = {}) {
   const fine = opts.fine ?? 5.5;      // ~18 cm — leaf clumps, bark grain
   const coarse = opts.coarse ?? 1.5;  // ~65 cm — branch masses, trunk swelling
   const amt = opts.amount ?? 0.34;
+  // Sample in WORLD-metric space, not raw object space.
+  //
+  // Every prop here is one geometry drawn at instance scales spanning an order
+  // of magnitude (propScale's power law puts stone from 0.08 to 2.2 and trees
+  // from 0.5 to 2.3). Sampling the raw `position` attribute gives all of them
+  // the SAME number of texture repeats regardless of how big they actually
+  // are, so a boulder's grain is stretched ~27x wider than a pebble's and the
+  // two stop reading as the same material. Dividing the sample position by the
+  // instance's own scale makes feature size constant in metres, which is what
+  // "micro-normal at a consistent scale" means.
+  const worldScale = opts.worldScale !== false;
   // 1.5 was nearly four times the terrain's equivalent, and on a small rim
   // clump — a 0.4 m sphere sampled at 0.18 m feature scale — the perturbation
   // exceeded the base normal and flipped it, which renders as hard black
@@ -598,7 +609,10 @@ export function applyFloraDetail(material, opts = {}) {
         // the UNDEFORMED position attribute, never the swayed one — wind must
         // not drag the texture across the surface
         vFlPos = position;
-        vFlNrm = normal;`);
+        vFlNrm = normal;
+        ${worldScale ? `#ifdef USE_INSTANCING
+          vFlPos *= length(instanceMatrix[0].xyz);
+        #endif` : ''}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D uFlTex;
@@ -652,6 +666,314 @@ export function applyFloraDetail(material, opts = {}) {
         }`);
   };
   const key = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => (key ? key.call(material) : '') + '-floradetail1';
+  material.customProgramCacheKey = () =>
+    (key ? key.call(material) : '') + '-floradetail2' + (worldScale ? 'w' : '');
+  return material;
+}
+
+// ============================================================================
+// Foliage: alpha-cut leaf cards, and light that goes THROUGH a leaf.
+//
+// The two things a canopy made of solid lobes cannot do, no matter how lumpy
+// the lobes are:
+//
+//   1. Break its own silhouette. A lobe's outline is a smooth closed curve, so
+//      a canopy of lobes is a union of smooth curves — still an arc, still
+//      moulded. In reference/star-citizen/microtech-01-122019-min.jpg the
+//      conifers dissolve into individual needles at the outline: the boundary
+//      between tree and sky is *stochastic*, not a curve. Only a cutout mask
+//      does that.
+//   2. Transmit. A leaf is thin and translucent; the sun behind a canopy makes
+//      it glow, and the terminator on a lit canopy is soft and warm rather
+//      than the hard cosine an opaque dielectric gives. Without it, foliage
+//      shades exactly like painted plastic — which is what it is.
+//
+// The alpha comes from a real `material.alphaMap` + `alphaTest` rather than a
+// discard injected by hand, because three.js's shadow pass builds its own
+// MeshDepthMaterial and copies ONLY `map`/`alphaMap`/`alphaTest` off the source
+// material (WebGLShadowMap.getDepthMaterial) — an onBeforeCompile discard is
+// invisible to it, and every leaf card would cast a solid rectangular shadow.
+// ============================================================================
+
+// Atlas layout: 2x2 cells. The bottom-left cell is deliberately SOLID, and
+// every non-leaf vertex (trunks, lobes, caps, stone) is given its centre uv —
+// so one material, one draw call, and one alphaMap covers both the cutout
+// foliage and the solid parts of the same plant.
+export const FOLIAGE_OPAQUE_UV = [0.25, 0.25];
+// [u0, v0] of each cutout cell; each cell is 0.5 x 0.5 in uv
+export const FOLIAGE_CELLS = { needle: [0.5, 0.0], broad: [0.0, 0.5], blade: [0.5, 0.5] };
+
+let _foliageTex = null;
+
+// Map a 0..1 card uv into a cell, inset from the cell border. The inset is not
+// cosmetic: mip levels below ~8x8 blend neighbouring cells, and the neighbour
+// here is the fully-opaque cell. Keeping the mask off the border means the
+// worst that bleeding can do at extreme range is make a distant card slightly
+// too solid — which is the failure direction alpha-tested foliage wants (the
+// other direction is the classic "canopy dissolves as you back away").
+const CELL_INSET = 0.06;
+export function foliageUV(cell, u, v) {
+  const c = FOLIAGE_CELLS[cell] || FOLIAGE_CELLS.broad;
+  const s = 0.5 * (1 - CELL_INSET * 2);
+  return [c[0] + 0.5 * CELL_INSET + u * s, c[1] + 0.5 * CELL_INSET + v * s];
+}
+
+// The mask itself, drawn in code (no downloaded assets — §4).
+//   G channel = coverage. three.js's alphamap_fragment reads .g, and so does
+//               the depth material's, so this is what cuts the silhouette.
+//   R channel = a baked leaf shading term, 0.5 = neutral. Leaf bases and the
+//               spine sit dark, tips catch light — the gradient that stops a
+//               card reading as a flat stamp.
+export function foliageTexture() {
+  if (_foliageTex || typeof document === 'undefined') return _foliageTex;
+  const S = 256, H = S / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = S;
+  const ctx = canvas.getContext('2d');
+  // background: fully transparent (G=0) with neutral shading (R=128)
+  ctx.fillStyle = 'rgb(128,0,128)';
+  ctx.fillRect(0, 0, S, S);
+  // the opaque cell — bottom-left in uv, which is TOP-left in canvas rows.
+  // (uv v=0 is the bottom row of the image; we only ever sample its centre,
+  // so orientation of the solid block does not matter, but the leaf cells'
+  // does: they are drawn tip-up in canvas space and used tip-up in uv.)
+  ctx.fillStyle = 'rgb(128,255,128)';
+  ctx.fillRect(0, H, H, H);
+
+  const rng = makeRng('foliage:mask');
+  const shade = (t) => `rgb(${Math.round(255 * (0.34 + 0.42 * t))},255,128)`;
+
+  // --- needle spray (uv cell [0.5,0]) : a conifer sprig -------------------
+  // This is the one that matters for the reference frames. A sprig is a rachis
+  // with a hundred fine needles fanning forward; its outline is not a shape,
+  // it is a comb, and that is exactly what the eye reads as "conifer" at any
+  // distance where individual needles are sub-pixel.
+  ctx.save();
+  ctx.translate(H + H * 0.5, H + H * 0.5);         // cell centre (canvas)
+  ctx.lineCap = 'round';
+  for (let branch = 0; branch < 5; branch++) {
+    const bx = (rng() - 0.5) * H * 0.30;
+    const ba = (rng() - 0.5) * 0.9;
+    const blen = H * (0.34 + rng() * 0.14);
+    ctx.save();
+    ctx.translate(bx, H * (0.16 + rng() * 0.18));
+    ctx.rotate(ba);
+    // the rachis
+    ctx.strokeStyle = shade(0.15);
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -blen); ctx.stroke();
+    const N = 26 + ((rng() * 10) | 0);
+    for (let i = 0; i < N; i++) {
+      const t = i / N;
+      const y = -blen * t;
+      const side = i % 2 ? 1 : -1;
+      const len = blen * (0.42 + rng() * 0.26) * (1 - t * 0.72);
+      const ang = (0.62 + rng() * 0.5) * side;
+      ctx.strokeStyle = shade(0.25 + t * 0.75 + rng() * 0.12);
+      ctx.lineWidth = 1.1 + rng() * 1.1;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(Math.sin(ang) * len, y - Math.cos(ang) * len * 0.55);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // --- broad-leaf cluster (uv cell [0,0.5]) -------------------------------
+  ctx.save();
+  ctx.translate(H * 0.5, H * 0.5);
+  for (let i = 0; i < 11; i++) {
+    const a = (i / 11) * Math.PI * 2 + rng() * 0.7;
+    const rr = H * (0.10 + rng() * 0.22);
+    const lx = Math.cos(a) * H * (0.06 + rng() * 0.20);
+    const ly = Math.sin(a) * H * (0.06 + rng() * 0.20) - H * 0.04;
+    ctx.save();
+    ctx.translate(lx, ly);
+    ctx.rotate(a + Math.PI * 0.5);
+    ctx.fillStyle = shade(0.3 + rng() * 0.65);
+    ctx.beginPath();
+    ctx.ellipse(0, -rr * 0.6, rr * 0.42, rr, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // midrib, darker: a leaf without one is a coloured pebble
+    ctx.strokeStyle = shade(0.05);
+    ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -rr * 1.5); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // --- serrated blade (uv cell [0.5,0.5]) : fronds, shrub leaves ----------
+  ctx.save();
+  ctx.translate(H + H * 0.5, H * 0.5);
+  {
+    const L = H * 0.44, W = H * 0.15;
+    ctx.fillStyle = shade(0.62);
+    ctx.beginPath();
+    ctx.moveTo(0, L);
+    ctx.quadraticCurveTo(W, L * 0.1, 0, -L);
+    ctx.quadraticCurveTo(-W, L * 0.1, 0, L);
+    ctx.fill();
+    // bite notches out of both edges so the outline is torn, not moulded
+    ctx.fillStyle = 'rgb(128,0,128)';
+    for (let i = 0; i < 16; i++) {
+      const t = rng();
+      const y = L - t * L * 2;
+      const w = W * (1 - Math.abs(y) / L) * 1.15;
+      const side = i % 2 ? 1 : -1;
+      const r = W * (0.20 + rng() * 0.32);
+      ctx.beginPath();
+      ctx.arc(side * (w + r * 0.45), y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = shade(0.12);
+    ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(0, L * 0.95); ctx.lineTo(0, -L * 0.95); ctx.stroke();
+  }
+  ctx.restore();
+
+  _foliageTex = new THREE.CanvasTexture(canvas);
+  _foliageTex.wrapS = _foliageTex.wrapT = THREE.ClampToEdgeWrapping;
+  _foliageTex.colorSpace = THREE.NoColorSpace;
+  _foliageTex.anisotropy = 4;
+  return _foliageTex;
+}
+
+// Wire the atlas onto a flora material, plus the two shading behaviours that
+// the cards need and the solid parts must NOT get.
+//
+// `aLeaf` (0 on solid geometry, 1 on a card) is a real vertex attribute rather
+// than a uv-region test, because the two branches want different things and a
+// float compare is cheaper than reasoning about atlas coordinates in the
+// fragment shader.
+export function applyFoliageCards(material, opts = {}) {
+  const tex = foliageTexture();
+  if (!tex) return material;
+  material.alphaMap = tex;
+  // Low on purpose. Foliage cutouts erode as their mask mips down (mean
+  // coverage falls below the threshold and the canopy thins with distance);
+  // a low threshold trades a slightly softer near-field edge for a canopy
+  // that still has leaves 150 m away.
+  material.alphaTest = opts.alphaTest ?? 0.34;
+  const leafShade = opts.leafShade ?? 0.55;
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (prev) prev.call(material, shader, renderer);
+    shader.uniforms.uLeafTex = { value: tex };
+    shader.uniforms.uLeafShade = { value: leafShade };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute float aLeaf;
+        varying float vLeaf;
+        varying vec2 vLeafUv;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vLeaf = aLeaf;
+        vLeafUv = uv;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D uLeafTex;
+        uniform float uLeafShade;
+        varying float vLeaf;
+        varying vec2 vLeafUv;`)
+      // the baked leaf gradient (R channel): dark at the leaf base and along
+      // the midrib, light at the tips. Without it a card is a flat stamp of
+      // one colour, which is the same defect as the lobe it replaced.
+      .replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
+        if (vLeaf > 0.5) {
+          float lsh = texture2D(uLeafTex, vLeafUv).r - 0.5;
+          diffuseColor.rgb *= 1.0 + lsh * uLeafShade * 2.0;
+        }`)
+      // A card is a flat quad standing edge-out of the canopy, so half of them
+      // are back-facing from any given view, and DOUBLE_SIDED flips the normal
+      // on a back face — which for an authored canopy-radial normal means the
+      // card lights from the wrong hemisphere and goes black. (This project
+      // has already shipped that exact bug once, from rim clumps poking
+      // through a cap; see flora.js.) Cards carry the canopy's own normal
+      // deliberately, so undo the flip for them and only for them.
+      .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+        #ifdef DOUBLE_SIDED
+          if (vLeaf > 0.5) normal *= faceDirection;
+        #endif`);
+  };
+  const key = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => (key ? key.call(material) : '') + '-leafcards1';
+  return material;
+}
+
+// Transmission through a leaf.
+//
+// Two lobes, because foliage does two visibly different things:
+//   - BACK-SCATTER: sun behind the canopy, light exits toward the eye. The
+//     classic cheap model (Frostbite/DICE): build a half-vector that leans the
+//     light direction into the surface, then a tight lobe around viewing
+//     straight down it.
+//   - WRAP: on the sunlit side the terminator is soft and warm, because light
+//     that entered a leaf a centimetre away comes back out here. A plain
+//     N-dot-L terminator is the giveaway that a canopy is a solid.
+//
+// Both are added at lights_fragment_end, where the direct/indirect split is
+// already resolved and the sun's own colour is still available. The shadow
+// mask damps them without killing them — a leaf in a mountain's shadow is
+// still lit through by the sky, just not by the sun.
+export function applyFoliageTranslucency(material, opts = {}) {
+  const color = opts.color || new THREE.Color(1.0, 0.92, 0.62);
+  const back = opts.back ?? 0.85;
+  const wrap = opts.wrap ?? 0.35;
+  const power = opts.power ?? 3.0;
+  const distort = opts.distort ?? 0.35;
+  const leafOnly = opts.leafOnly ?? false;
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (prev) prev.call(material, shader, renderer);
+    shader.uniforms.uSssColor = { value: color };
+    shader.uniforms.uSssBack = { value: back };
+    shader.uniforms.uSssWrap = { value: wrap };
+    shader.uniforms.uSssPow = { value: power };
+    shader.uniforms.uSssDist = { value: distort };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform vec3 uSssColor;
+        uniform float uSssBack;
+        uniform float uSssWrap;
+        uniform float uSssPow;
+        uniform float uSssDist;`)
+      // Light 0 explicitly, not a loop over NUM_DIR_LIGHTS: the sun is the only
+      // DirectionalLight in this scene (main.js), and the `directLight` struct
+      // left over from lights_fragment_begin belongs to whichever light ran
+      // last — which is the headlamp PointLight, not the sun.
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        #if NUM_DIR_LIGHTS > 0
+        {
+          float sssK = 1.0;
+          ${leafOnly ? 'sssK = step(0.5, vLeaf);' : ''}
+          if (sssK > 0.0) {
+            float sssShadow = 1.0;
+            #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+            {
+              DirectionalLightShadow sssDL = directionalLightShadows[ 0 ];
+              float sm = receiveShadow ? getShadow( directionalShadowMap[ 0 ],
+                sssDL.shadowMapSize, sssDL.shadowIntensity, sssDL.shadowBias,
+                sssDL.shadowRadius, vDirectionalShadowCoord[ 0 ] ) : 1.0;
+              // a shaded leaf is still lit THROUGH by the sky, just not the sun
+              sssShadow = mix(0.30, 1.0, sm);
+            }
+            #endif
+            vec3 sssN = geometryNormal;
+            vec3 sssV = geometryViewDir;
+            vec3 sssL = directionalLights[ 0 ].direction;
+            // light that went through the leaf and came out toward the eye
+            vec3 sssH = normalize(sssL + sssN * uSssDist);
+            float bk = pow(clamp(dot(sssV, -sssH), 0.0, 1.0), uSssPow) * uSssBack;
+            // and the soft warm terminator on the lit side
+            float nl = dot(sssN, sssL);
+            float wr = max(0.0, (nl + uSssWrap) / (1.0 + uSssWrap)) - max(0.0, nl);
+            reflectedLight.directDiffuse += directionalLights[ 0 ].color * uSssColor
+              * diffuseColor.rgb * (bk + wr * 2.0) * sssShadow * sssK;
+          }
+        }
+        #endif`);
+  };
+  const key = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => (key ? key.call(material) : '') + '-sss1';
   return material;
 }
