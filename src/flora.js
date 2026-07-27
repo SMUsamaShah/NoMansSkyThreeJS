@@ -457,7 +457,10 @@ export function floraPalette(planet, rng) {
   // any distance where the silhouette is all you read, a duet is a monoculture
   const canopy3 = canopy.clone().offsetHSL(0.14 + rng() * 0.22, -0.10, (rng() - 0.3) * 0.11);
   const trunk = (planet.pal.rock || base).clone()
-    .lerp(new THREE.Color(0.34, 0.24, 0.17), 0.4 + rng() * 0.25);
+    // back to the original dark bark: it was lightened as compensation for the
+    // double sRGB conversion, and with that gone it read at 0.18-0.20 where
+    // real bark sits at 0.04-0.10
+    .lerp(new THREE.Color(0.24, 0.15, 0.10), 0.45 + rng() * 0.3);
   const accent = new THREE.Color().setHSL(rng(), 0.85, 0.58);
   // Same albedo floor the terrain palette gets, and for the same measured
   // reason. tree1's vertex colours were bottoming out at 0.008 luminance with
@@ -473,7 +476,7 @@ export function floraPalette(planet, rng) {
     return c;
   };
   lift(canopy, 0.085); lift(canopy2, 0.075); lift(canopy3, 0.080);
-  lift(trunk, 0.055);   // bark is dark, but it is not a silhouette
+  lift(trunk, 0.038);   // bark is dark, but it is not a silhouette
   return { canopy, canopy2, canopy3, trunk, accent };
 }
 
