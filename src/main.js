@@ -81,6 +81,9 @@ const sunShadow = new THREE.DirectionalLight(0xffffff, 0);
 sunShadow.castShadow = true;
 sunShadow.visible = false;
 const SHADOW_MAP = window.matchMedia('(pointer: coarse)').matches ? 1024 : 2048;
+// how far up the sun-light sits; the shadow camera's near/far bracket it, so
+// these two must not drift apart
+const SHADOW_LIGHT_DIST = 4000;
 sunShadow.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
 sunShadow.shadow.camera.near = 100;
 sunShadow.shadow.camera.far = 8500;
@@ -896,7 +899,7 @@ function frame() {
     sunShadow.intensity = sysLight.intensity * shadowBlend;
     sunShadow.color.copy(sysLight.color)
       .lerp(_warmC.setRGB(1, 0.45, 0.2), envSunset * 0.55);
-    sunShadow.position.copy(sunDirCam).multiplyScalar(4000);
+    sunShadow.position.copy(sunDirCam).multiplyScalar(SHADOW_LIGHT_DIST);
     sunShadow.target.position.set(0, 0, 0);
 
     // Fit the shadow box to how far you can actually see detail. A fixed
@@ -914,11 +917,23 @@ function frame() {
     if (Math.abs(sc.right - half) > half * 0.08) {
       sc.left = sc.bottom = -half;
       sc.right = sc.top = half;
+      // And the DEPTH range, which is the actual cause of the huge hard-edged
+      // dark patch on surface frames (§3b 10a — confirmed by ?shadow=0, which
+      // removes it entirely). near=100/far=8500 spread the depth buffer over
+      // 8.4 km while the shadowed region spans a few hundred metres, so
+      // precision collapsed and terrain self-shadowed across whole hillsides.
+      // Bracket the light distance instead: same box, several times the depth
+      // resolution. Widening the BOX (70 m to 150 m) changed nothing, because
+      // the box was never the problem.
+      const margin = half * 3 + 800;
+      sc.near = Math.max(50, SHADOW_LIGHT_DIST - margin);
+      sc.far = SHADOW_LIGHT_DIST + margin;
       sc.updateProjectionMatrix();
     }
     // normalBias must track texel size — it was a flat 2.0 m, wider than a
     // whole trunk, so every prop shoved its own shadow off itself.
     sunShadow.shadow.normalBias = (half * 2 / SHADOW_MAP) * 1.7;
+
     sysLight.intensity *= 1 - shadowBlend;
     if (universe.fadingSystem) universe.fadingSystem.sunLight.intensity *= 1 - shadowBlend;
   }

@@ -9,6 +9,14 @@ import { Simplex } from './noise.js';
 import { makeRng } from './rng.js';
 import { injectAerial } from './scattering.js';
 
+// ?bakedshadow=0 lifts the terrain's baked ray-marched sun shadow to 1.0, so a
+// dark region that survives it is NOT that term. Pairs with ?shadow=0 (shadow
+// map) to bisect any dark area on the ground in two shots.
+export const BAKED_SHADOW_LO = {
+  value: (typeof location !== 'undefined'
+    && new URLSearchParams(location.search).get('bakedshadow') === '0') ? 1.0 : 0.42,
+};
+
 // one global clock drives water and wind everywhere
 export const TIME = { value: 0 };
 export function tickShaders(dt) { TIME.value += dt; }
@@ -95,6 +103,7 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
     // compiled at first render — by then the planet knows if it has clouds
     const cloudTex = planet.cloudShadowTex || blankTexture();
     shader.uniforms.uDetailTex = { value: tex };
+    shader.uniforms.uBakedLo = BAKED_SHADOW_LO;
     shader.uniforms.uDetailK = { value: strength };
     shader.uniforms.uMacroK = { value: macroK };
     shader.uniforms.uDetailS = { value: new THREE.Vector2(scale1, scale2) };
@@ -158,6 +167,7 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D uDetailTex;
+        uniform float uBakedLo;
         uniform float uDetailK;
         uniform float uMacroK;
         uniform vec2 uDetailS;
@@ -241,7 +251,7 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
 
           // ---- baked ray-marched sun shadows: mountains shade whole
           // valleys, kilometres beyond the realtime shadow map's reach
-          diffuseColor.rgb *= mix(0.42, 1.0, vMat.z);
+          diffuseColor.rgb *= mix(uBakedLo, 1.0, vMat.z);
 
           // ---- micro grain, biome-styled
           vec3 w = pow(abs(normalize(vLocalNrm)), vec3(4.0));
@@ -367,7 +377,7 @@ export function applyTerrainDetail(material, planet, strength = 0.2, macroK = 0.
     // a mountainside instead of using the camera's height everywhere
     injectAerial(shader, 'length(vLocalPos) - uPlanetR');
   };
-  material.customProgramCacheKey = () => 'terrain-palette-v7';
+  material.customProgramCacheKey = () => 'terrain-palette-v8';
 }
 
 // Living water: scrolling normal perturbation, plus Beer–Lambert depth
