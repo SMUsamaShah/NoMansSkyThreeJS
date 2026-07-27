@@ -193,30 +193,38 @@ Recreate the *experience* of No Man's Sky in the browser with three.js:
 - Commit and push in small increments (the remote container can revert the
   working tree without warning; origin is the source of truth).
 
-## 5. Status snapshot (v0.21.0, 2026-07-16)
+## 5. Status snapshot (v0.22.0, 2026-07-27)
 
 Done and verified:
 - Seeded universe, systems, warp/manual travel, land/walk/dive/takeoff.
-- Quadtree cube-sphere terrain with geomorphed, seam-tested LOD + prefetch.
-- Volumetric clouds unified with cloud shadows/impostors; GTAO experiment.
-- Per-planet alien flora (two tree species, shrubs, glowing pods, real grass),
-  near scatter bubble + far proxy tier to ~4.5 km + canopy-tinted terrain to
-  orbit; meadow landing bias for demos.
-- Sky dome fixed (its shader had never compiled); de-halofied nebulae/band.
-- Procedural space stations (§2.6): one per system, seeded — ring/spine/
-  cross/cluster topologies, HDR window bands, blinking beacons, rotating
-  sections; HUD label; `NMS.stationVista()` for screenshots.
-- Biome ambience (§2.7): fully synthesized — space hum, wind, leaf rustle +
-  chirps, dry wind, ice shimmer + creaks, lava rumble + crackle, alien
-  murmur + bubbles, underwater muffle; starts on gesture, M mutes,
-  `?audio=0` for tests; graph verified by `tools/_audio_probe.mjs`.
-- Touch controls; desktop controls; quality-low path.
+- Quadtree cube-sphere terrain with geomorphed, seam-tested LOD + prefetch,
+  now with a mid-scale (100–500 m) patchiness octave and stronger micro-relief.
+- Volumetric clouds; sky dome (its shader had never compiled before v0.20).
+- Per-planet alien flora: near bubble + far proxy tier (~4.5 km) + canopy-
+  tinted terrain to orbit; grass with baked root→tip gradients.
+- Procedural space stations, now with industrial hull plating (panel cells,
+  seams, rivets, vents, hazard chevrons) at consistent panel scale.
+- The ship rebuilt as a real craft: lofted fuselage, clearcoat canopy, swept
+  extruded wings, lathed nacelles with nozzles, plated hull as
+  map+bump+roughness, nav strobes. `NMS.shipPortrait()` frames it.
+- **Nebula sky**: GPU-baked cubemap per universe (filaments, dust lanes,
+  knots, galactic band), restrained so space stays black.
+- **Throttle flight model** with an altitude-aware speed limiter (cruise is
+  capped at ~3 s to close the remaining altitude; boost punches through),
+  strafe/roll/thrusters/brake, HUD throttle bar; space dust motes for speed.
+- Biome ambience exists but ships OFF (§2.7).
+- Suites: sanity, seam (all seamless), 24 shots, touch 13/13 — all green.
+  The shots suite now also fails on any shader-compile error, after a GLSL
+  reserved word (`patch`) silently erased all terrain with no page error.
 
-Pending / next (in owner's priority order):
-1. Perceived-seamlessness polish on terrain detail resolve (§2.2).
-2. Station interiors / docking (not yet requested — confirm scope first).
-3. GTAO tuning for log-depth, then consider default-on (§2.3).
-4. three.js upgrade / WebGPU evaluation (§4).
+Pending / next (highest visual return first):
+1. Aerial perspective / atmospheric scattering on distant terrain, and
+   shadow quality — the biggest remaining gap to the §3.4 fidelity target.
+2. Terrain geometry character: erosion, cliff strata, scattered debris
+   (the ground is smooth where Star Citizen is eroded).
+3. Rework ambience until it beats silence, then default it on.
+4. Perceived-seamlessness polish on terrain detail resolve (§2.2).
+5. GTAO tuning for log-depth; three.js upgrade / WebGPU evaluation.
 
 Known cosmetic issues (logged, not blocking): faint parallel streaks over
 horizon suns; moon landings can spawn in dense forest; ice plains featureless

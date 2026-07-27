@@ -137,10 +137,17 @@ const joy = await rectOf('#joystick');
 const w0 = await page.evaluate('NMS.pos()');
 await touch('touchStart', [{ x: joy.x, y: joy.y, id: 1 }]);
 await touch('touchMove', [{ x: joy.x, y: joy.y - 30, id: 1 }]);
-await sleep(1200);
-// speed-based check is fps-independent (SwiftShader clamps dt hard)
-const stickSpeed = await page.evaluate('NMS.walkSpeed()');
-await sleep(1200);
+// POLL rather than sleep a fixed wall-clock window: SwiftShader clamps dt,
+// so a heavy scene advances sim-time far slower than real time and the
+// walker's acceleration ramp would still be climbing when we sampled. We
+// assert the same thresholds, just given enough frames to get there.
+let stickSpeed = 0;
+for (let i = 0; i < 40; i++) {
+  await sleep(250);
+  stickSpeed = Math.max(stickSpeed, await page.evaluate('NMS.walkSpeed()'));
+  const d = await page.evaluate('NMS.pos()');
+  if (stickSpeed > 3 && Math.hypot(d[0] - w0[0], d[1] - w0[1], d[2] - w0[2]) > 1.2) break;
+}
 await touch('touchEnd', []);
 const w1 = await page.evaluate('NMS.pos()');
 const walked = Math.hypot(w1[0] - w0[0], w1[1] - w0[1], w1[2] - w0[2]);
