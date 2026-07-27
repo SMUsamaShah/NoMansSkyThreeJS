@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { hash3i, hashFloat } from './rng.js';
 import { buildFlora } from './flora.js';
 import { chainAerial } from './scattering.js';
+import { propScale, FAR_TREE_S0, FAR_TREE_S1 } from './scatter.js';
 
 const TILE_M = 1024;         // metres per cache tile
 const CELL_M = 32;           // metres per proxy-tree cell (32 per tile edge)
@@ -242,7 +243,10 @@ export class FarFlora {
           _q.setFromUnitVectors(Y, _jd);
           _q2.setFromAxisAngle(Y, hashFloat(h0, 1) * Math.PI * 2);
           _q.multiply(_q2);
-          const sc = 0.75 + hashFloat(h0, 2) * 0.65;
+          // same skew and same range as the near bubble — §2.4: if the two
+          // tiers disagree about mean scale the forest changes size at the
+          // handoff, which is exactly the popping this tier exists to prevent
+          const sc = propScale(hashFloat(h0, 2), FAR_TREE_S0, FAR_TREE_S1);
           _s.set(sc, sc * (0.85 + hashFloat(h0, 0) * 0.4), sc);
           _m.compose(_p, _q, _s);
           (hashFloat(h0, 3) < dens[1] ? m0 : m1).push(..._m.elements);

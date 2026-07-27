@@ -37,7 +37,30 @@ const RANGE = 24;            // cells of radius around the camera
 // instance caps sized ABOVE the densest possible biome in range — a kind
 // that saturates its cap renders an anchor-dependent subset, which shows
 // up as props sliding around while you walk
-const CAPS = { grass: 10000, shrub: 2600, tree0: 1500, tree1: 1500, pod: 1200, default: 2000 };
+const CAPS = {
+  grass: 10000, shrub: 2600, tree0: 1500, tree1: 1500, pod: 1200,
+  // stone litters at several per cell now, so its ceiling has to clear the
+  // densest mineral biome in range or rocks visibly slide around as you walk
+  rock: 6000, boulder: 2200,
+  default: 2000,
+};
+// props that spawn several per cell rather than one
+const COPIES = { grass: 4, rock: 6, boulder: 2 };
+
+// ONE size distribution, shared by the near bubble and the far proxy tier.
+// A uniform draw made every tree the same tree; this biases toward small so a
+// stand reads as mostly young with a few that got to the light, the way the
+// conifers do in reference/star-citizen/microtech-01-122019-min.jpg.
+// It lives here and is exported because §2.4 requires the two tiers to agree:
+// if their MEAN scale differs the forest visibly changes size at the handoff.
+// (A cubic skew shipped briefly on the near tier alone and did exactly that —
+// mean 0.92 near against 1.07 far.)
+export function propScale(t, s0, s1) { return s0 + (s1 - s0) * Math.pow(t, 2.2); }
+// the dominant forest recipe's tree range, which the far tier must mirror
+export const FAR_TREE_S0 = 0.5;
+export const FAR_TREE_S1 = 2.3;
+// max random lie-angle (radians): stone is dropped, not planted
+const TILTS = { rock: 0.9, boulder: 0.55 };
 export function capFor(kind) { return CAPS[kind] ?? CAPS.default; }
 const SHOW_BELOW_ALT = 600;  // metres
 
@@ -56,6 +79,7 @@ const _m = new THREE.Matrix4();
 const _ic = new THREE.Color();
 const _e1 = new THREE.Vector3();
 const _e2 = new THREE.Vector3();
+const _tilt = new THREE.Vector3();
 const Y = new THREE.Vector3(0, 1, 0);
 
 // shared mineral geometries (unit-ish size, origin at base) — vegetation is
@@ -64,7 +88,10 @@ function baseGeo() {
   const shift = (g, y) => { g.translate(0, y, 0); return g; };
   return {
     rock: craggyGeo(new THREE.IcosahedronGeometry(0.7, 1), 0.75, 101),
-    boulder: shift(craggyGeo(new THREE.IcosahedronGeometry(1.4, 1), 0.6, 202), 0.9),
+    // detail 2, not 1: a boulder is the biggest prop on the ground and an
+    // 80-triangle one reads as a cut gem. Its density is low enough that the
+    // extra triangles are affordable where the same spend on `rock` would not be.
+    boulder: shift(craggyGeo(new THREE.IcosahedronGeometry(1.4, 2), 0.5, 202), 0.9),
     crystal: shift(new THREE.OctahedronGeometry(1, 0), 0.9),
     blob: shift(new THREE.SphereGeometry(0.9, 6, 5), 0.5),
     cactus: shift(new THREE.CylinderGeometry(0.28, 0.36, 2.4, 6), 1.2),
@@ -74,27 +101,42 @@ let GEO = null;
 const FLORA_KINDS = ['tree0', 'tree1', 'shrub', 'pod', 'grass'];
 
 // per-biome prop recipes: [kind, density 0..1, minScale, maxScale]
+//
+// Density is the probability that a 9 m cell picks this kind at all, so a
+// recipe summing to 0.14 leaves 86% of the ground bare — which is what made
+// our deserts empty next to reference/star-citizen/daymar-122019-min.jpg.
+// Stone densities are way up, and stone SIZE RANGES are now wide: combined
+// with propScale's skew, s0..s1 spanning an order of magnitude
+// gives a power-law scree — mostly grit, occasional boulder — instead of one
+// size class repeated. That spread is the thing the reference frames have and
+// we did not.
 const RECIPES = {
-  grass:    [['grass', 0.78, 0.9, 1.7], ['shrub', 0.1, 0.7, 1.4], ['tree0', 0.05, 0.7, 1.2], ['pod', 0.02, 0.8, 1.4], ['rock', 0.03, 0.3, 0.9]],
-  forest:   [['tree0', 0.4, 0.7, 1.3], ['tree1', 0.16, 0.6, 1.15], ['shrub', 0.15, 0.8, 1.5], ['grass', 0.22, 0.8, 1.5], ['rock', 0.03, 0.3, 0.8]],
-  snow:     [['tree1', 0.05, 0.6, 1.2], ['rock', 0.07, 0.3, 1.0], ['boulder', 0.02, 0.5, 1.2]],
-  sand:     [['cactus', 0.05, 0.7, 1.5], ['shrub', 0.025, 0.5, 1.0], ['rock', 0.06, 0.3, 1.0]],
-  rock:     [['rock', 0.18, 0.4, 1.3], ['boulder', 0.05, 0.6, 1.6]],
-  regolith: [['rock', 0.16, 0.3, 1.4], ['boulder', 0.05, 0.5, 2.0]],
-  ice:      [['crystal', 0.06, 0.6, 1.8], ['rock', 0.07, 0.3, 1.0]],
-  ash:      [['rock', 0.12, 0.3, 1.2], ['boulder', 0.03, 0.5, 1.5]],
-  ember:    [['rock', 0.06, 0.3, 1.0]],
-  slime:    [['pod', 0.14, 1.0, 2.0], ['tree1', 0.05, 0.8, 1.6], ['blob', 0.14, 0.6, 2.0], ['grass', 0.2, 1.0, 1.8], ['crystal', 0.03, 0.5, 1.4]],
-  weird:    [['tree1', 0.12, 0.9, 2.0], ['crystal', 0.11, 0.7, 2.6], ['pod', 0.08, 1.0, 2.0], ['blob', 0.06, 0.8, 2.2]],
-  shore:    [['rock', 0.03, 0.2, 0.7], ['shrub', 0.02, 0.5, 1.0]],
-  dryland:  [['grass', 0.3, 0.7, 1.3], ['shrub', 0.06, 0.6, 1.2], ['rock', 0.04, 0.3, 0.9]],
+  grass:    [['grass', 0.7, 0.9, 1.7], ['shrub', 0.09, 0.7, 1.4], ['tree0', 0.05, 0.5, 1.9], ['pod', 0.02, 0.8, 1.4], ['rock', 0.12, 0.10, 1.5]],
+  forest:   [['tree0', 0.36, 0.5, 2.3], ['tree1', 0.14, 0.45, 2.0], ['shrub', 0.14, 0.8, 1.5], ['grass', 0.2, 0.8, 1.5], ['rock', 0.12, 0.10, 1.8]],
+  snow:     [['tree1', 0.05, 0.45, 2.0], ['rock', 0.30, 0.10, 2.2], ['boulder', 0.07, 0.45, 1.8]],
+  sand:     [['cactus', 0.04, 0.7, 1.5], ['shrub', 0.02, 0.5, 1.0], ['rock', 0.34, 0.08, 1.9], ['boulder', 0.04, 0.45, 1.9]],
+  rock:     [['rock', 0.46, 0.10, 2.0], ['boulder', 0.12, 0.5, 2.1]],
+  regolith: [['rock', 0.44, 0.09, 1.9], ['boulder', 0.11, 0.45, 2.0]],
+  ice:      [['crystal', 0.06, 0.6, 1.8], ['rock', 0.26, 0.09, 1.8]],
+  ash:      [['rock', 0.38, 0.09, 2.2], ['boulder', 0.08, 0.45, 1.7]],
+  ember:    [['rock', 0.24, 0.09, 1.8]],
+  slime:    [['pod', 0.14, 1.0, 2.0], ['tree1', 0.05, 0.6, 2.2], ['blob', 0.14, 0.6, 2.0], ['grass', 0.2, 1.0, 1.8], ['crystal', 0.03, 0.5, 1.4]],
+  weird:    [['tree1', 0.12, 0.6, 2.6], ['crystal', 0.11, 0.7, 2.6], ['pod', 0.08, 1.0, 2.0], ['blob', 0.06, 0.8, 2.2]],
+  shore:    [['rock', 0.22, 0.08, 1.4], ['shrub', 0.02, 0.5, 1.0]],
+  dryland:  [['grass', 0.28, 0.7, 1.3], ['shrub', 0.055, 0.6, 1.2], ['rock', 0.20, 0.09, 1.9]],
 };
 
 function propColors(planet) {
   const p = planet.pal;
+  // Stone belongs to the ground it sits on. p.rock alone is the CLIFF colour,
+  // which on a pale desert is far darker than the sand — scattered over a
+  // bright surface it read as a field of black cutouts, where in
+  // reference/star-citizen/daymar-122019-min.jpg the stones are only a shade
+  // darker than what they lie on. Pull them toward the mid land tone.
+  const landMid = p.land[Math.min(1, p.land.length - 1)].c;
   const base = {
-    rock: p.rock.clone(),
-    boulder: p.rock.clone().multiplyScalar(0.85),
+    rock: p.rock.clone().lerp(landMid, 0.38).multiplyScalar(1.1),
+    boulder: p.rock.clone().lerp(landMid, 0.28).multiplyScalar(1.0),
     crystal: null,
     blob: (p.blotch || p.rock).clone(),
     cactus: new THREE.Color(0x55a04a).convertSRGBToLinear(),
@@ -304,8 +346,11 @@ export class Scatter {
     else _ce1.set(1, 0, 0).projectOnPlane(_up).normalize();
     _ce2.crossVectors(_up, _ce1);
 
-    // grass grows in little clumps; everything else stands alone
-    const copies = kind === 'grass' ? 4 : 1;
+    // Grass grows in clumps; stone litters. One prop per 9 m cell is fine for
+    // a tree and nothing like a real rocky surface — look at reference/
+    // star-citizen/daymar-122019-min.jpg or drifters-microtech.jpg: stones
+    // every metre or two, spanning pebble to boulder. Those need copies.
+    const copies = COPIES[kind] || 1;
     for (let c = 0; c < copies && counts[kind] < capFor(kind); c++) {
       const hc = c === 0 ? h0 : hash3i(qx + c * 131, qy - c * 57, qz + c * 263, seedI);
       // jitter inside the cell, then re-sample ground height there
@@ -324,13 +369,23 @@ export class Scatter {
       // would shift past 32 bits) and lane 2 was already spent on the jitter
       // offset — so size and position were correlated, which is visible as
       // patterning once you know to look.
-      const hs = hash3i(qx + 977, qy - 401, qz + 733, seedI);
+      const hs = hash3i(qx + 977 + c * 37, qy - 401 - c * 89, qz + 733 + c * 149, seedI);
       // Skewed, not uniform: a real stand is mostly young and small with a few
-      // that got to the light. A flat 0.7–1.3 spread made every tree the same
-      // tree, which is what turned a forest into wallpaper.
-      const t = hashFloat(hs, 0);
-      const sc = (s0 + (s1 - s0) * 1.45 * t * t * t) * edge;
+      // that got to the light, and a real scree is mostly grit with the odd
+      // boulder. A flat 0.7–1.3 spread made every tree the same tree, which is
+      // what turned a forest into wallpaper.
+      const sc = propScale(hashFloat(hs, 0), s0, s1) * edge;
       _s.set(sc, sc * (0.74 + hashFloat(hs, 1) * 0.62), sc);
+      if (TILTS[kind]) {
+        // stone was not planted: let it lie at whatever angle it fell, or it
+        // reads as a row of eggs stood on end
+        // its OWN vector: _e1 holds the cell-enumeration frame for the whole
+        // rebuild, so borrowing it here corrupted every cell placed after the
+        // first rock — and corrupted it differently depending on where the
+        // camera stood, which is exactly the anchor-dependent churn the walk
+        // test exists to catch
+        _q.multiply(_q2.setFromAxisAngle(_tilt.set(1, 0, 0), (hashFloat(hs, 2) - 0.5) * TILTS[kind]));
+      }
       _m.compose(_v2, _q, _s);
       if (kind === 'grass') {
         // tufts blend the ground colour with the planet's canopy tint: they

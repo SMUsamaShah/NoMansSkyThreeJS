@@ -245,31 +245,48 @@ tint, which the report calls its single most important insight); Whittaker-style
 biomes; seeded simplex fBm/ridged/domain-warped noise; macro+detail blending;
 triplanar on terrain; instanced everything.
 
-**Taken — ranked, none implemented yet:**
-1. **Hydraulic/thermal erosion.** The clearest gap against `reference/`: Daymar
-   and microTech have dendritic channels and sediment fans; our fBm ridges have
-   none. Erosion is a grid simulation, not a closed-form function of a
-   direction, so it cannot go straight into `height()` — the report's own
-   pragmatic route (bake offline into tiling detail heightmaps, blend in)
-   is the one compatible with our LOD/determinism constraints. Must stay
-   consistent CPU-side for placement and across LOD levels.
-2. **An "erosion"/flatness control field** (Minecraft 1.18's second axis: high
-   erosion → lower and *flatter*). Our worlds are uniformly rugged; the
-   references have vast flat plains punctuated by relief. This one *is*
-   closed-form, LOD-safe and cheap — best value-to-risk on the list.
+**Correction to a first reading of this report.** Two items were initially
+logged here as gaps and are not: `height()` *already* has a province field
+(`belt` / `plainsCalm`) that is exactly the Minecraft-1.18 erosion axis — calm
+plains against rugged belts — and it *already* carves dendritic drainage via
+`canyonAmp` plus a finer tributary pass. Check the code before believing a
+report about it, including this section.
+
+**Taken — ranked. Items 1–2 are done; the rest are not started.**
+1. **DONE (v0.23) — ground litter at many sizes.** The real gap against
+   `reference/star-citizen/daymar-122019-min.jpg` was not terrain shape, it was
+   that the ground was *bare*. Scatter density is the probability a 9 m cell
+   picks a kind at all, so `sand` summing to 0.135 left 86% of the surface
+   empty. Stone now spawns several per cell over a wide size range which
+   `propScale`'s skew turns into a power law — mostly grit, occasional
+   boulder — and lies at a random angle instead of standing on end.
+2. **DONE (v0.23) — one size distribution across both flora tiers.**
+   `propScale` is exported and used by the near bubble *and* the far proxy
+   tier, because §2.4 requires their mean scale to agree. Tree ranges widened
+   to ~0.5–2.3 so one geometry reads as saplings through giants.
 3. **View-space thickening for grass** (Ghost of Tsushima): rotate near-edge-on
    blades toward the camera so they never vanish. Our blades are real
-   `frond()` geometry rendered DoubleSide, so this applies directly.
+   `frond()` geometry rendered DoubleSide, so this applies directly — but the
+   grass normals are overwritten to +Y for field-soft lighting, so it needs a
+   per-vertex blade-facing attribute added in `buildGrassTuft`.
 4. **Stochastic / hex tiling** (Quílez texture-repetition) on the detail
    texture. At the near-field octave (~0.35 m) the 256px tile repeats hundreds
    of times across a vista. Costs extra samples — measure.
 5. **Octahedral impostors** for the far flora tier, replacing ~40-triangle
    proxies. Would raise achievable density enough to attack the
    "monoculture at one scale" gap (§3b item 4's successor).
-6. **Web Workers for chunk generation.** We build on the main thread against a
+6. **More than two tree species per planet.** The deepest cause of the
+   monoculture look: `buildFlora` builds exactly `tree0`/`tree1`, and one
+   recipe entry usually dominates a biome.
+7. **Hydraulic/thermal erosion** as a *detail* pass — the province and canyon
+   systems give large-scale character, but there are no sediment fans or fine
+   rill networks. Erosion is a grid simulation, not a closed-form function of
+   a direction, so the report's bake-into-tiling-detail-heightmaps route is
+   the only one compatible with our LOD/determinism rules.
+8. **Web Workers for chunk generation.** We build on the main thread against a
    millisecond budget; transferable `ArrayBuffer`s would remove the hitch
    ceiling rather than manage it.
-7. **`BatchedMesh`** (r156+) to consolidate draw calls (currently 850–1000).
+9. **`BatchedMesh`** (r156+) to consolidate draw calls (currently 850–1000).
 
 **To verify, not assume:** the report claims the logarithmic depth buffer
 degrades MSAA where geometry intersects (three.js #22017) and recommends
