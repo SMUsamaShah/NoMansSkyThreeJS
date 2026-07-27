@@ -278,6 +278,25 @@ Citizen and Elite Dangerous, indexed by the property each one demonstrates
 sky restraint, clouds); `reference/README.md` says what to look for in each
 and which requirement it backs. Refresh with `node tools/fetch_reference.mjs`.
 
+12. **Shadow-to-ambient contrast is too high.** Shadowed ground drops to
+    near-black; in `reference/star-citizen/dunboro-aerial-view-microtech.jpg`
+    shadowed grass stays green and readable, because it is still lit by the
+    whole sky. This is the real defect behind the big dark region on surface
+    frames — which is itself NOT an artifact, see below. OPEN, and it is a
+    lighting-balance problem, not a shadowing bug.
+
+**Closed by bisection, recorded so it is not re-investigated.** A large
+hard-edged dark region on surface frames (`screenshots/darkbisect/`) is a
+*legitimate cast shadow* from a ridge out of frame — a long straight crest
+casts a long straight shadow. `?shadow=0` removes it only because it removes
+all shadows. Ruled out first, each costing a round trip: the shadow-box
+boundary (70 m → 150 m, no change), the sea (grass is visible *inside* the
+region), water opacity (Fresnel alpha added, no visible change), and shadow
+depth precision (near/far tightened from an 8.4 km span to ~2.5 km, no change —
+though that is a genuine quality improvement and was kept). Four wrong
+structural guesses preceded the bisect; `tools/_darkbisect.mjs` settled it in
+three shots. **Bisect first.**
+
 ## 3c. Terrain/vegetation research report — what we take, what we reject
 
 A research report ("Building a Procedural Ground-to-Space Terrain System in
