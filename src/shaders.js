@@ -433,9 +433,24 @@ export function applyWaterWaves(material, planet, waveScale = 1 / 14) {
           vec2 g = (texture2D(uDetailTex, uv1).rg - 0.5) * 0.5
                  + (texture2D(uDetailTex, uv2).rg - 0.5) * 0.3;
           normal = normalize(normal + vec3(g.x, g.y, 0.0) * 0.55);
+        }
+        {
+          // Fresnel-driven opacity.
+          //
+          // The liquid is a transparent material with a CONSTANT opacity (0.66
+          // for water), and three.js has no reason to vary that with viewing
+          // angle. So looking across a lake at a grazing angle — where a real
+          // water surface goes bright and very nearly a mirror, one of the most
+          // recognisable cues there is — ours stayed 66% dark blue with the
+          // seabed showing through, and the sky reflection never got a chance
+          // to dominate. Schlick against the wave-perturbed normal, so the
+          // ripples break the sheen up instead of laying a flat gloss over it.
+          float cosT = clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0);
+          float F = pow(1.0 - cosT, 5.0);
+          diffuseColor.a = clamp(mix(diffuseColor.a, 1.0, F * 0.92), 0.0, 1.0);
         }`);
   };
-  material.customProgramCacheKey = () => 'water-depth-waves';
+  material.customProgramCacheKey = () => 'water-fresnel-waves';
 }
 
 // Procedural cloud coverage evaluated per-FRAGMENT: a texture-based fBm
