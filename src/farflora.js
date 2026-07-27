@@ -23,14 +23,26 @@ const RADIUS = 4.4;          // tiles of reach around the camera (~4.5 km)
 const CAP = 24000;           // per species
 const SHOW_BELOW = 16000;    // m altitude; fade starts at 10 km
 
-// per-biome CLUMP probability per 32 m cell and the tree0 share. One proxy
-// stands for several near-tier trees (they inflate with distance), so these
-// chase the near tier's per-m² density as far as the instance budget allows —
-// a 12× density cliff at the bubble edge reads as "the forest ends here"
+// per-biome CLUMP probability per 32 m cell, then the species mix as
+// cumulative thresholds. One proxy stands for several near-tier trees (they
+// inflate with distance), so the clump probability chases the near tier's
+// per-m² density as far as the instance budget allows — a 12x density cliff at
+// the bubble edge reads as "the forest ends here".
+//
+// The mix used to be a single "tree0 share" tested against hashFloat(h, 3) —
+// but lane 3 shifts past 32 bits and only ever yields 0.0005..0.0034, so that
+// comparison was CONSTANT: every biome drew exactly one species for its entire
+// far tier. That was the distant half of the monoculture look. Thresholds are
+// cumulative over SPECIES and drawn from their own hash now.
 const FAR_DENSITY = {
-  forest: [0.8, 0.72], grass: [0.32, 0.95], snow: [0.42, 0.0],
-  slime: [0.38, 0.0], weird: [0.5, 0.0], dryland: [0.1, 0.9],
+  forest:  [0.8,  [0.44, 0.76, 1.0]],
+  grass:   [0.32, [0.40, 0.70, 1.0]],
+  snow:    [0.42, [0.0, 0.6, 1.0]],
+  slime:   [0.38, [0.0, 0.6, 1.0]],
+  weird:   [0.5,  [0.0, 0.58, 1.0]],
+  dryland: [0.1,  [0.45, 0.75, 1.0]],
 };
+const SPECIES = 3;
 
 const _dir = new THREE.Vector3();
 const _anchor = new THREE.Vector3();
@@ -83,7 +95,7 @@ export class FarFlora {
   constructor() {
     this.planet = null;
     this.meshes = null;       // [tree0 proxies, tree1 proxies]
-    this.tiles = new Map();   // packed tile key -> {m0: Float32Array, n0, m1, n1}
+    this.tiles = new Map();   // packed tile key -> {m: Float32Array[], n: number[]}
     this.queue = [];
     this.lastKey = '';
     this.dirty = false;
@@ -96,7 +108,7 @@ export class FarFlora {
     this.planet = planet;
     if (!planet) return;
     const flora = planet.flora || (planet.flora = buildFlora(planet));
-    this.meshes = [flora.far0, flora.far1].map((geo) => {
+    this.meshes = [flora.far0, flora.far1, flora.far2].map((geo) => {
       const mat = new THREE.MeshStandardMaterial({
         color: 0xffffff, vertexColors: true, roughness: 0.95, flatShading: true,
       });
@@ -201,7 +213,7 @@ export class FarFlora {
     _anchor.set(qx, qy, qz).normalize();
     frame(_anchor, _e1, _e2);
     const SUB = Math.round(TILE_M / CELL_M) + 1;
-    const m0 = [], m1 = [];
+    const buckets = Array.from({ length: SPECIES }, () => []);
     const seen = new Set();
     for (let gy = -SUB; gy <= SUB; gy++) {
       for (let gx = -SUB; gx <= SUB; gx++) {
@@ -249,13 +261,17 @@ export class FarFlora {
           const sc = propScale(hashFloat(h0, 2), FAR_TREE_S0, FAR_TREE_S1);
           _s.set(sc, sc * (0.85 + hashFloat(h0, 0) * 0.4), sc);
           _m.compose(_p, _q, _s);
-          (hashFloat(h0, 3) < dens[1] ? m0 : m1).push(..._m.elements);
+          // its own hash: lane 3 of h0 is degenerate (see FAR_DENSITY)
+          const hsp = hashFloat(hash3i(ux + 613, uy - 209, uz + 887, seedI), 0);
+          let si = SPECIES - 1;
+          for (let k = 0; k < SPECIES; k++) { if (hsp < dens[1][k]) { si = k; break; } }
+          buckets[si].push(..._m.elements);
         }
       }
     }
     return {
-      m0: new Float32Array(m0), n0: m0.length / 16,
-      m1: new Float32Array(m1), n1: m1.length / 16,
+      m: buckets.map((b) => new Float32Array(b)),
+      n: buckets.map((b) => b.length / 16),
     };
   }
 
@@ -272,19 +288,19 @@ export class FarFlora {
       return (qx - ax) * (qx - ax) + (qy - ay) * (qy - ay) + (qz - az) * (qz - az);
     };
     const keys = [...this.tiles.keys()].sort((a, b) => (dist2(a) - dist2(b)) || (a - b));
-    let n0 = 0, n1 = 0;
-    const a0 = this.meshes[0].instanceMatrix.array;
-    const a1 = this.meshes[1].instanceMatrix.array;
+    const counts = new Array(SPECIES).fill(0);
+    const arrs = this.meshes.map((im) => im.instanceMatrix.array);
     for (const k of keys) {
       const t = this.tiles.get(k);
-      const c0 = Math.min(t.n0, CAP - n0), c1 = Math.min(t.n1, CAP - n1);
-      if (c0 > 0) { a0.set(t.m0.subarray(0, c0 * 16), n0 * 16); n0 += c0; }
-      if (c1 > 0) { a1.set(t.m1.subarray(0, c1 * 16), n1 * 16); n1 += c1; }
+      for (let si = 0; si < SPECIES; si++) {
+        const c = Math.min(t.n[si], CAP - counts[si]);
+        if (c > 0) { arrs[si].set(t.m[si].subarray(0, c * 16), counts[si] * 16); counts[si] += c; }
+      }
     }
-    this.meshes[0].count = n0;
-    this.meshes[1].count = n1;
-    this.meshes[0].instanceMatrix.needsUpdate = true;
-    this.meshes[1].instanceMatrix.needsUpdate = true;
+    for (let si = 0; si < SPECIES; si++) {
+      this.meshes[si].count = counts[si];
+      this.meshes[si].instanceMatrix.needsUpdate = true;
+    }
   }
 }
 

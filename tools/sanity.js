@@ -206,16 +206,17 @@ for (const type of Object.keys(TYPES)) {
     const buildFar = () => {
       const ff = new FarFlora();
       for (let i = 0; i < 200 && (i < 2 || ff.pending() > 0); i++) ff.update(p, farCam, 300);
-      const counts = [ff.meshes[0].count, ff.meshes[1].count];
+      const counts = ff.meshes.map((m) => m.count);
       const sig = ff.meshes[0].instanceMatrix.array.slice(0, counts[0] * 16).join(',');
       ff.clear();
       return { counts, sig };
     };
     const fa = buildFar(), fb = buildFar();
-    check(fa.counts[0] + fa.counts[1] > 100, `${type}: far flora suspiciously sparse (${fa.counts})`);
-    check(fa.counts[0] === fb.counts[0] && fa.counts[1] === fb.counts[1] && fa.sig === fb.sig,
+    const total = (c) => c.reduce((a, b) => a + b, 0);
+    check(total(fa.counts) > 100, `${type}: far flora suspiciously sparse (${fa.counts})`);
+    check(fa.counts.every((c, i) => c === fb.counts[i]) && fa.sig === fb.sig,
       `${type}: far flora not deterministic (${fa.counts} vs ${fb.counts})`);
-    console.log(`         far flora: ${fa.counts[0]}+${fa.counts[1]} proxy trees in reach`);
+    console.log(`         far flora: ${fa.counts.join('+')} = ${total(fa.counts)} proxy trees in reach`);
   }
   let leafTris = 0;
   for (const r of p.lod.roots) {

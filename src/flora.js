@@ -150,8 +150,14 @@ function frond(rng, len, wid, curl, color) {
 
 // ---- species builders (origin at base, ~2–6 m tall) ------------------------
 
-function buildTree(rng, pal, canopyColor, noise) {
-  const style = ['orbs', 'cap', 'fronds', 'tentacles', 'orbs', 'cap'][(rng() * 6) | 0];
+export const TREE_STYLES = ['orbs', 'cap', 'fronds', 'tentacles'];
+
+function buildTree(rng, pal, canopyColor, noise, style) {
+  // style is chosen WITHOUT replacement by buildFlora. Left to an independent
+  // roll per species, a planet would routinely draw the same silhouette three
+  // times — and at any distance where the outline is all you read, three
+  // identical outlines is still a monoculture no matter how they are coloured.
+  if (!style) style = TREE_STYLES[(rng() * TREE_STYLES.length) | 0];
   let h = 3.2 + rng() * 4.2;
   if (rng() < 0.18) h *= 1.6;        // some worlds grow giants
   const leanX = (rng() - 0.5) * 0.65, leanZ = (rng() - 0.5) * 0.65;
@@ -360,10 +366,13 @@ export function floraPalette(planet, rng) {
       : rng() < 0.4 ? 0.06 + rng() * 0.24 : (rng() - 0.5) * 0.08;
   const canopy = base.clone().offsetHSL(shift, 0.18, 0.06);
   const canopy2 = canopy.clone().offsetHSL(0.3 + rng() * 0.35, 0.05, (rng() - 0.5) * 0.1);
+  // a third species: two trees per world meant every stand was a duet, and at
+  // any distance where the silhouette is all you read, a duet is a monoculture
+  const canopy3 = canopy.clone().offsetHSL(0.14 + rng() * 0.22, -0.06, (rng() - 0.4) * 0.16);
   const trunk = (planet.pal.rock || base).clone()
     .lerp(new THREE.Color(0.24, 0.15, 0.1), 0.45 + rng() * 0.3);
   const accent = new THREE.Color().setHSL(rng(), 0.85, 0.58);
-  return { canopy, canopy2, trunk, accent };
+  return { canopy, canopy2, canopy3, trunk, accent };
 }
 
 // every geometry here is a pure function of the planet seed
@@ -374,11 +383,16 @@ export function buildFlora(planet) {
   const noise = new Simplex(makeRng(planet.seed + ':flora:shape'));
   const pal = planet.floraPal || floraPalette(planet, rng);
   const pod = buildPodPlant(rng, pal, noise);
-  const t0 = buildTree(rng, pal, pal.canopy, noise);
-  const t1 = buildTree(rng, pal, pal.canopy2, noise);
+  // three DIFFERENT silhouettes, drawn without replacement
+  const pool = TREE_STYLES.slice();
+  const takeStyle = () => pool.splice((rng() * pool.length) | 0, 1)[0];
+  const t0 = buildTree(rng, pal, pal.canopy, noise, takeStyle());
+  const t1 = buildTree(rng, pal, pal.canopy2, noise, takeStyle());
+  const t2 = buildTree(rng, pal, pal.canopy3 || pal.canopy2, noise, takeStyle());
   return {
     tree0: t0.geo,
     tree1: t1.geo,
+    tree2: t2.geo,
     shrub: buildShrub(rng, pal),
     pod: pod.geo,
     podGlow: pod.glow,
@@ -389,5 +403,6 @@ export function buildFlora(planet) {
     // horizon-range proxies for the far tier
     far0: buildFarTree(rng, pal, t0.style, t0.h, pal.canopy),
     far1: buildFarTree(rng, pal, t1.style, t1.h, pal.canopy2),
+    far2: buildFarTree(rng, pal, t2.style, t2.h, pal.canopy3 || pal.canopy2),
   };
 }

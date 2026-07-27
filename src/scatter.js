@@ -10,7 +10,7 @@ import { chainAerial } from './scattering.js';
 import { buildFlora } from './flora.js';
 
 // wind strength per prop kind (0 = rigid)
-const SWAY = { grass: 0.08, shrub: 0.05, pod: 0.03, tree0: 0.012, tree1: 0.012, blob: 0.02, cactus: 0.008 };
+const SWAY = { grass: 0.08, shrub: 0.05, pod: 0.03, tree0: 0.012, tree1: 0.012, tree2: 0.012, blob: 0.02, cactus: 0.008 };
 
 // jagged rock: displace a subdivided solid by hashed per-vertex noise —
 // crags instead of platonic dice
@@ -38,7 +38,7 @@ const RANGE = 24;            // cells of radius around the camera
 // that saturates its cap renders an anchor-dependent subset, which shows
 // up as props sliding around while you walk
 const CAPS = {
-  grass: 10000, shrub: 2600, tree0: 1500, tree1: 1500, pod: 1200,
+  grass: 10000, shrub: 2600, tree0: 1500, tree1: 1500, tree2: 1500, pod: 1200,
   // stone litters at several per cell now, so its ceiling has to clear the
   // densest mineral biome in range or rocks visibly slide around as you walk
   rock: 6000, boulder: 2200,
@@ -98,7 +98,7 @@ function baseGeo() {
   };
 }
 let GEO = null;
-const FLORA_KINDS = ['tree0', 'tree1', 'shrub', 'pod', 'grass'];
+const FLORA_KINDS = ['tree0', 'tree1', 'tree2', 'shrub', 'pod', 'grass'];
 
 // per-biome prop recipes: [kind, density 0..1, minScale, maxScale]
 //
@@ -111,17 +111,17 @@ const FLORA_KINDS = ['tree0', 'tree1', 'shrub', 'pod', 'grass'];
 // size class repeated. That spread is the thing the reference frames have and
 // we did not.
 const RECIPES = {
-  grass:    [['grass', 0.7, 0.9, 1.7], ['shrub', 0.09, 0.7, 1.4], ['tree0', 0.05, 0.5, 1.9], ['pod', 0.02, 0.8, 1.4], ['rock', 0.12, 0.10, 1.5]],
-  forest:   [['tree0', 0.36, 0.5, 2.3], ['tree1', 0.14, 0.45, 2.0], ['shrub', 0.14, 0.8, 1.5], ['grass', 0.2, 0.8, 1.5], ['rock', 0.12, 0.10, 1.8]],
-  snow:     [['tree1', 0.05, 0.45, 2.0], ['rock', 0.30, 0.10, 2.2], ['boulder', 0.07, 0.45, 1.8]],
+  grass:    [['grass', 0.7, 0.9, 1.7], ['shrub', 0.09, 0.7, 1.4], ['tree0', 0.025, 0.5, 1.9], ['tree2', 0.025, 0.5, 1.8], ['pod', 0.02, 0.8, 1.4], ['rock', 0.12, 0.10, 1.5]],
+  forest:   [['tree0', 0.22, 0.5, 2.3], ['tree1', 0.16, 0.45, 2.0], ['tree2', 0.12, 0.5, 2.1], ['shrub', 0.14, 0.8, 1.5], ['grass', 0.2, 0.8, 1.5], ['rock', 0.12, 0.10, 1.8]],
+  snow:     [['tree1', 0.03, 0.45, 2.0], ['tree2', 0.02, 0.45, 1.9], ['rock', 0.30, 0.10, 2.2], ['boulder', 0.07, 0.45, 1.8]],
   sand:     [['cactus', 0.04, 0.7, 1.5], ['shrub', 0.02, 0.5, 1.0], ['rock', 0.34, 0.08, 1.9], ['boulder', 0.04, 0.45, 1.9]],
   rock:     [['rock', 0.46, 0.10, 2.0], ['boulder', 0.12, 0.5, 2.1]],
   regolith: [['rock', 0.44, 0.09, 1.9], ['boulder', 0.11, 0.45, 2.0]],
   ice:      [['crystal', 0.06, 0.6, 1.8], ['rock', 0.26, 0.09, 1.8]],
   ash:      [['rock', 0.38, 0.09, 2.2], ['boulder', 0.08, 0.45, 1.7]],
   ember:    [['rock', 0.24, 0.09, 1.8]],
-  slime:    [['pod', 0.14, 1.0, 2.0], ['tree1', 0.05, 0.6, 2.2], ['blob', 0.14, 0.6, 2.0], ['grass', 0.2, 1.0, 1.8], ['crystal', 0.03, 0.5, 1.4]],
-  weird:    [['tree1', 0.12, 0.6, 2.6], ['crystal', 0.11, 0.7, 2.6], ['pod', 0.08, 1.0, 2.0], ['blob', 0.06, 0.8, 2.2]],
+  slime:    [['pod', 0.14, 1.0, 2.0], ['tree1', 0.03, 0.6, 2.2], ['tree2', 0.02, 0.6, 2.1], ['blob', 0.14, 0.6, 2.0], ['grass', 0.2, 1.0, 1.8], ['crystal', 0.03, 0.5, 1.4]],
+  weird:    [['tree1', 0.07, 0.6, 2.6], ['tree2', 0.05, 0.6, 2.4], ['crystal', 0.11, 0.7, 2.6], ['pod', 0.08, 1.0, 2.0], ['blob', 0.06, 0.8, 2.2]],
   shore:    [['rock', 0.22, 0.08, 1.4], ['shrub', 0.02, 0.5, 1.0]],
   dryland:  [['grass', 0.28, 0.7, 1.3], ['shrub', 0.055, 0.6, 1.2], ['rock', 0.20, 0.09, 1.9]],
 };
@@ -168,7 +168,7 @@ function floraEmissive(mat) {
   mat.customProgramCacheKey = () => (key ? key.call(mat) : '') + '-flora';
 }
 // self-light per flora kind (keeps vegetation readable in shadow; pods glow)
-const FLORA_GLOW = { tree0: 0.16, tree1: 0.16, shrub: 0.14, pod: 0.55, grass: 0.09 };
+const FLORA_GLOW = { tree0: 0.16, tree1: 0.16, tree2: 0.16, shrub: 0.14, pod: 0.55, grass: 0.09 };
 
 export class Scatter {
   constructor() {

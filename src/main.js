@@ -966,7 +966,7 @@ window.NMS = {
     return {
       frame: frameNo, calls: info.calls, tris: info.triangles, chunks,
       pending: pendingChunks(), state, alt: nearestAlt,
-      far: farFlora.meshes ? farFlora.meshes[0].count + farFlora.meshes[1].count : 0,
+      far: farFlora.meshes ? farFlora.meshes.reduce((a, m) => a + m.count, 0) : 0,
       // any program that failed to compile: a whole subsystem is invisible.
       // Suites fail on this — it never surfaces as a page error.
       shaderFails: renderer.info.programs.filter((p) => p.diagnostics).length,
