@@ -391,7 +391,11 @@ function buildGrassTuft(rng) {
   const n = 7 + (rng() * 3) | 0;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 + rng();
-    const len = 0.55 + rng() * 0.45;
+    // 0.55-1.0 m blades, scaled up to 1.7x at placement, put 1.7 m reeds right
+    // against a 2 m eye — grass filling a third of the frame. Real ground cover
+    // is 0.1-0.5 m; with the density raised to 40 tufts per cell this now reads
+    // as a lawn rather than a field of giant rushes.
+    const len = 0.22 + rng() * 0.28;
     const f = frond(rng, len, 0.055, 0.8 + rng() * 0.9, white);
     const pos = f.attributes.position, col = f.attributes.color;
     for (let v = 0; v < pos.count; v++) {

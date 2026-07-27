@@ -903,7 +903,13 @@ function frame() {
     // ±300 m box spent 2048 texels on ground you were nowhere near, leaving
     // 0.29 m/texel — too coarse for a tree to cast anything readable. On foot
     // this tightens to ~0.05 m/texel and props get real contact shadows.
-    const half = clamp(70 + nearestAlt * 1.4, 70, 900);
+    // The floor was 70 m, which gave lovely contact shadows and put a HARD
+    // EDGE 70 m from the camera: three.js does not fade a directional shadow at
+    // its box boundary, so terrain simply stops being shadowed in a straight
+    // line across the frame. 150 m still resolves at 0.146 m/texel on a 2048
+    // map — ample for a tree — and moves the boundary out past the busy near
+    // field where the eye was catching it.
+    const half = clamp(150 + nearestAlt * 1.4, 150, 900);
     const sc = sunShadow.shadow.camera;
     if (Math.abs(sc.right - half) > half * 0.08) {
       sc.left = sc.bottom = -half;
