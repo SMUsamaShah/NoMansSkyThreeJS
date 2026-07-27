@@ -496,6 +496,38 @@ export class Planet {
     if (p.sea) for (const s of p.sea) lin(s.c);
     if (p.stripes) for (const s of p.stripes) lin(s.c);
     for (const k of ['forest', 'rock', 'snow', 'blotch', 'crevasse', 'ember']) lin(p[k]);
+
+    // ---- albedo floor -----------------------------------------------------
+    // Measured with NMS.lightProbe() against a vista at 79 degrees sun
+    // elevation: the ground's linear albedo came back at 0.019 luminance, with
+    // the sun beating all ambient 5:1. So the frames were not underlit and the
+    // ambient was not too blue — the SURFACE was nearly black, and the only
+    // thing left with any colour in the image was atmospheric haze. That is
+    // the whole reason lush worlds arrived blue-grey whatever their palette
+    // said, and why chasing it through lighting and desaturation got nowhere.
+    //
+    // Real linear albedos: vegetation 0.05-0.12, soil and rock 0.06-0.20,
+    // sand 0.15-0.30, snow 0.6-0.85. Every land stop here sat at 0.008-0.09
+    // and rock at ~0.01 on EVERY planet type — three to ten times too dark.
+    //
+    // Lift by luminance with a 0.45 gamma, and never darken: dark surfaces get
+    // pulled up to something a real material could be, while ice and snow,
+    // which were already in range, are left exactly alone. Hue and chroma
+    // ratios are preserved, so the seeded palette identity survives.
+    const lumOf = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    const lift = (c) => {
+      if (!c) return;
+      const l = lumOf(c);
+      if (l < 1e-5) return;
+      const target = Math.pow(l, 0.45) * 0.42;
+      const k = Math.max(1, target / l);
+      if (k > 1) c.multiplyScalar(k);
+    };
+    for (const s of p.land) lift(s.c);
+    if (p.sea) for (const s of p.sea) lift(s.c);
+    if (p.stripes) for (const s of p.stripes) lift(s.c);
+    for (const k of ['forest', 'rock', 'snow', 'blotch', 'crevasse', 'ember']) lift(p[k]);
+
     this.pal = p;
 
     // each world's species tint its forests: a planet covered in purple

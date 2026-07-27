@@ -1111,6 +1111,43 @@ window.NMS = {
     ui.setTarget(p, nav.pos.distanceTo(p.posUniv));
     return true;
   },
+  // Why is a frame the colour it is? Guessing at this from screenshots burned
+  // a lot of time; this reports what each light path is ACTUALLY contributing
+  // at the camera's own ground point, so the blue-world problem can be argued
+  // from numbers instead of from impressions.
+  lightProbe() {
+    const p = nearest;
+    if (!p) return { error: 'no planet in range' };
+    const up = new THREE.Vector3().copy(nav.pos).sub(p.posUniv).normalize();
+    const sun = p.sunDirLocal;
+    const h = p.height(up, p.fullMaxFreq);
+    const alb = new THREE.Color();
+    p.colorAt(up, h, 0.1, p.fullMaxFreq, alb);
+    const sysLight = universe.system.sunLight;
+    const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    // irradiance-ish scalars, comparable to each other
+    const sunE = (sunShadow.visible ? sunShadow.intensity : sysLight.intensity)
+      * lum(sunShadow.visible ? sunShadow.color : sysLight.color);
+    const hemiE = hemi.intensity * lum(hemi.color);
+    const ambE = ambient.intensity * lum(ambient.color);
+    const envE = (scene.environmentIntensity || 1) * Math.min(1, envInAtmo)
+      * lum(_horC) * 0.6;   // rough: the env is mostly this sky colour
+    return {
+      sunElevDeg: +(Math.asin(Math.max(-1, Math.min(1, up.dot(sun)))) * 180 / Math.PI).toFixed(1),
+      day: +envDay.toFixed(3), inAtmo: +envInAtmo.toFixed(3), sunset: +envSunset.toFixed(3),
+      alt: Math.round(nearestAlt),
+      albedo: [alb.r, alb.g, alb.b].map((v) => +v.toFixed(3)),
+      albedoLum: +lum(alb).toFixed(3),
+      // the numbers that matter: how much light comes from the (white) sun
+      // versus the (blue) sky. If sky wins, the ground is blue no matter what.
+      sun: +sunE.toFixed(3), hemi: +hemiE.toFixed(3),
+      ambient: +ambE.toFixed(3), env: +envE.toFixed(3),
+      skyOverSun: +((hemiE + ambE + envE) / Math.max(sunE, 1e-6)).toFixed(3),
+      skyColor: [_horC.r, _horC.g, _horC.b].map((v) => +v.toFixed(3)),
+      aerialDensity: aerialP.density,
+      fogDensity: +scene.fog.density.toFixed(7),
+    };
+  },
   // Hover over LAND, in daylight, looking out across relief.
   //
   // teleport() aims at scenicDir, which on an ocean world happily parks you
