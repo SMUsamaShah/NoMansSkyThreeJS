@@ -23,29 +23,32 @@ const W = 1100, H = 620;   // every crop normalised to this
 // ours ↔ reference, matched by VIEW TYPE. Comparing our surface shot against
 // their orbital shot would measure nothing.
 const PAIRS = [
-  { name: '01-aerial-vista',
+  { name: '01-aerial-vista', clean: 'screenshots/blind-src/aerial-vista.png',
     ours: 'screenshots/vista-atlas/01-hills-220m.png',
     ref: 'reference/star-citizen/dunboro-aerial-view-microtech.jpg',
     view: 'elevated view over vegetated hills in daylight' },
-  { name: '02-surface-eye',
+  { name: '02-surface-eye', clean: 'screenshots/blind-src/surface-eye.png',
     ours: 'screenshots/look/05-surface-meadow.png',
     ref: 'reference/star-citizen/drifters-microtech.jpg',
     view: 'ground-level / low view across terrain with vegetation and stone' },
-  { name: '03-orbit-limb',
+  { name: '03-orbit-limb', clean: 'screenshots/blind-src/orbit-limb.png',
     ours: 'screenshots/look/03-orbit.png',
     ref: 'reference/elite-dangerous/ed-odyssey-atmospheric-planet.jpg',
     view: 'planet seen from orbit with its atmospheric limb' },
-  { name: '04-dry-vista',
+  { name: '04-dry-vista', clean: 'screenshots/blind-src/dry-vista.png',
     ours: 'screenshots/rocks/02-vista.png',
     ref: 'reference/star-citizen/daymar-122019-min.jpg',
     view: 'arid/rocky terrain vista' },
-  { name: '05-horizon',
+  { name: '05-horizon', clean: 'screenshots/blind-src/horizon.png',
     ours: 'screenshots/vista-atlas/03-horizon-1500m.png',
     ref: 'reference/elite-dangerous/canyon-planet.jpg',
     view: 'high vantage looking to a distant horizon' },
 ];
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
+// prefer a clean hud=0 frame from tools/blindshots.mjs; fall back to the older
+// HUD-bearing probe output only if that has not been shot yet
+const pick = async (clean, fallback) => (await exists(clean) ? clean : fallback);
 
 if (process.argv.includes('--reveal')) {
   console.log(await readFile(`${OUT}/KEY.json`, 'utf8'));
@@ -80,10 +83,12 @@ async function normalise(file) {
 const key = [];
 let built = 0;
 for (const p of PAIRS) {
+  p.ours = await pick(p.clean, p.ours);
   if (!await exists(p.ours) || !await exists(p.ref)) {
     console.warn(`! skip ${p.name}: missing ${await exists(p.ours) ? p.ref : p.ours}`);
     continue;
   }
+  if (p.ours !== p.clean) console.warn(`  (${p.name}: no clean hud=0 frame yet — run tools/blindshots.mjs)`);
   await mkdir(`${OUT}/${p.name}`, { recursive: true });
   // coin flip per pair, so the judge cannot learn "ours is always A"
   const oursIsA = Math.random() < 0.5;
