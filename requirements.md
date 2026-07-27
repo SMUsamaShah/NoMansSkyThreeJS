@@ -213,19 +213,17 @@ damage each does to the illusion:
    desaturating or re-tinting flora: that was tried, and since planet.js
    blends floraPal.canopy into the terrain's forest tint it drained the
    landscape further.
-5c. **UNRESOLVED: hard dark patches on 'cap'-style canopies.** Visible on the
-   large foreground trees in screenshots/flora-close/01-meadow.png. Ruled out
-   by measurement or by direct test, in order: clump/cap intersection showing
-   DoubleSide backfaces (moved clumps outside the rim — no change); the flora
-   detail's normal relief flipping normals (1.5 to 0.45 — no change); the cap
-   underside darkening floor (0.55 to 0.74 — no change); dark vertex colour
-   (measured — tree0's darkest vertex is 0.08 luminance, so the patches are
-   NOT albedo); and raising FLORA_GLOW (no change, and the reason is now
-   known: floraEmissive multiplies emissive by vColor, so 0.34 on a 0.08
-   canopy contributes 0.027 — that knob cannot lift shadowed foliage as
-   written). Remaining suspicion is self-shadowing from the shadow map at
-   clump scale versus the terrain-tuned normalBias. Next step is to bisect it
-   with ?post=0 and shadows disabled rather than guess again.
+5c. ~~**Hard dark patches on 'cap'-style canopies.**~~ FIXED in v0.23. They were
+   `offsetHSL` with a negative LIGHTNESS term applied to lobe colours. That term
+   is absolute and clamps at zero, and foliage colours are dark to begin with
+   (a lifted canopy sits near 0.06 HSL lightness), so an offset of
+   `(rng()-0.55)*0.13` clamped whole lobes to pure black. Found by bisection
+   after five wrong guesses: the patches survived with shadow mapping entirely
+   disabled, which ruled out self-shadowing and pointed at albedo. Lobe tinting
+   now varies value MULTIPLICATIVELY (`lobeTint`), which cannot reach zero.
+   Zero sub-0.02 vertices across three seeds and all three species, down from
+   171. **Lesson worth keeping: never use offsetHSL's lightness term to darken
+   an already-dark colour.**
 6. **Vegetation silhouettes do not break up.** Partly addressed — canopies now
    carry rim clumps and scalloped lathes, so the outline is overlapping masses
    rather than one arc. Still far from needle-level break-up. Canopies are smooth solids with

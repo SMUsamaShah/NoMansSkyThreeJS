@@ -58,7 +58,9 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY_LOW ? 1.25 : IS_TOUCH ? 1.7 : 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
-renderer.shadowMap.enabled = true;
+// ?shadow=0 to bisect shading artifacts: if a dark patch survives with shadow
+// mapping off, it is albedo or normals, not self-shadowing.
+renderer.shadowMap.enabled = qs.get('shadow') !== '0';
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('app').appendChild(renderer.domElement);
 

@@ -148,6 +148,20 @@ function frond(rng, len, wid, curl, color) {
   return paint(g, color, rng, 0.12);
 }
 
+// Vary a lobe's colour WITHOUT the risk of driving it to black.
+//
+// offsetHSL's lightness term is absolute and clamps at 0. Foliage colours are
+// dark to begin with (a lifted canopy sits near 0.06 HSL lightness), so an
+// offset like (rng()-0.55)*0.13 simply clamped whole lobes to pure black —
+// which is what those hard dark patches on every cap canopy were. Confirmed by
+// bisection: they survived with shadow mapping entirely disabled, so they were
+// never self-shadowing. Vary value MULTIPLICATIVELY instead, which cannot
+// reach zero, and keep the hue drift that makes a canopy read as layered.
+function lobeTint(out, base, rng, hueVar = 0.05, valLo = 0.82, valHi = 1.16) {
+  out.copy(base).offsetHSL((rng() - 0.5) * hueVar, 0, 0);
+  return out.multiplyScalar(valLo + rng() * (valHi - valLo));
+}
+
 // ---- species builders (origin at base, ~2–6 m tall) ------------------------
 
 export const TREE_STYLES = ['orbs', 'cap', 'fronds', 'tentacles'];
@@ -182,7 +196,7 @@ function buildTree(rng, pal, canopyColor, noise, style) {
       const rr = R * (0.42 + rng() * 0.34);
       const reach = R * (0.72 + rng() * 0.4);
       // outer lobes catch more sky, so they sit a touch lighter and cooler
-      _c.copy(canopyColor).offsetHSL((rng() - 0.5) * 0.05, 0, (rng() - 0.35) * 0.09);
+      lobeTint(_c, canopyColor, rng, 0.05, 0.88, 1.18);
       parts.push(place(blob(rng, rr, _c, noise, { lumps: 1.35 }),
         top.x + Math.cos(a) * reach,
         top.y + R * (0.05 + rng() * 0.55),
@@ -260,7 +274,7 @@ function buildTree(rng, pal, canopyColor, noise, style) {
         // DoubleSide, those were backfaces with flipped normals, which showed
         // as hard black patches across every canopy.
         const reach = r * (0.94 + rng() * 0.22);
-        _rc.copy(canopyColor).offsetHSL((rng() - 0.5) * 0.04, 0, (rng() - 0.55) * 0.13);
+        lobeTint(_rc, canopyColor, rng, 0.04, 0.80, 1.10);
         parts.push(place(blob(rng, rr, _rc, noise, { lumps: 1.5, squash: 0.72 }),
           top.x + Math.cos(a) * reach,
           top.y - ch * 0.15 + ch * (0.02 + rng() * 0.22),
