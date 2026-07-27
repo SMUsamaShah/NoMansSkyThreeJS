@@ -497,3 +497,99 @@ export function applyWindSway(material, amount) {
   };
   material.customProgramCacheKey = () => 'wind-sway-' + amount;
 }
+
+// ============================================================================
+// Flora surface detail.
+//
+// This is the answer to "it still looks childish". Species count, size spread
+// and silhouette variety were all real gaps, but none of them was THE gap: a
+// smooth, single-colour surface reads as moulded plastic no matter how many
+// shapes you make out of it. Every tree here was one flat albedo with no
+// texture, no relief and no self-shadowing, which is the difference between a
+// toy and a plant. Compare any leaf mass in reference/star-citizen/ — it is
+// mottled, it darkens into its own interior, and it catches light unevenly.
+//
+// Triplanar, in the geometry's OWN local space (the raw `position` attribute,
+// captured before wind sway so the texture cannot swim as the plant moves).
+// That also means it costs no UVs — which is just as well, since mergeGeos
+// discards them.
+// ============================================================================
+export function applyFloraDetail(material, opts = {}) {
+  const tex = detailTexture();
+  if (!tex) return material;
+  const fine = opts.fine ?? 5.5;      // ~18 cm — leaf clumps, bark grain
+  const coarse = opts.coarse ?? 1.5;  // ~65 cm — branch masses, trunk swelling
+  const amt = opts.amount ?? 0.34;
+  const relief = opts.relief ?? 1.5;
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (prev) prev.call(material, shader, renderer);
+    shader.uniforms.uFlTex = { value: tex };
+    shader.uniforms.uFlS = { value: new THREE.Vector2(fine, coarse) };
+    shader.uniforms.uFlK = { value: amt };
+    shader.uniforms.uFlRelief = { value: relief };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vFlPos;
+        varying vec3 vFlNrm;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        // the UNDEFORMED position attribute, never the swayed one — wind must
+        // not drag the texture across the surface
+        vFlPos = position;
+        vFlNrm = normal;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D uFlTex;
+        uniform vec2 uFlS;
+        uniform float uFlK;
+        uniform float uFlRelief;
+        varying vec3 vFlPos;
+        varying vec3 vFlNrm;
+        float flTri(vec3 p, vec3 w, float s, int ch) {
+          vec2 a = texture2D(uFlTex, p.yz * s).rg;
+          vec2 b = texture2D(uFlTex, p.zx * s).rg;
+          vec2 c = texture2D(uFlTex, p.xy * s).rg;
+          vec2 m = a * w.x + b * w.y + c * w.z;
+          return ch == 0 ? m.r : m.g;
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          vec3 fw = pow(abs(normalize(vFlNrm)), vec3(4.0));
+          fw /= (fw.x + fw.y + fw.z);
+          float f = flTri(vFlPos, fw, uFlS.x, 0) - 0.5;
+          float c = flTri(vFlPos, fw, uFlS.y, 1) - 0.5;
+          // mottle
+          diffuseColor.rgb *= 1.0 + (f * 0.9 + c * 1.15) * uFlK;
+          // and a touch of interior occlusion — but MEAN-PRESERVING. The
+          // first cut multiplied by up to 0.81 on top of blob()'s baked AO,
+          // shadeVertical()'s gradient and the palette's own darkening, and
+          // four stacked multipliers turned every canopy black. Lift and
+          // darken symmetrically so the average albedo is unchanged.
+          diffuseColor.rgb *= 1.0 + clamp((f + c) * 0.5, -0.20, 0.20) * uFlK;
+        }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        {
+          vec3 fw = pow(abs(normalize(vFlNrm)), vec3(4.0));
+          fw /= (fw.x + fw.y + fw.z);
+          roughnessFactor = clamp(
+            roughnessFactor + (flTri(vFlPos, fw, uFlS.x, 1) - 0.5) * 0.35, 0.12, 1.0);
+        }`)
+      .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+        {
+          // relief: this, more than albedo, is what stops a surface reading
+          // as moulded — it makes the light break up across it
+          vec3 fw = pow(abs(normalize(vFlNrm)), vec3(4.0));
+          fw /= (fw.x + fw.y + fw.z);
+          float e = 0.035;
+          float gx = flTri(vFlPos + vec3(e, 0.0, 0.0), fw, uFlS.x, 0)
+                   - flTri(vFlPos - vec3(e, 0.0, 0.0), fw, uFlS.x, 0);
+          float gy = flTri(vFlPos + vec3(0.0, e, 0.0), fw, uFlS.x, 0)
+                   - flTri(vFlPos - vec3(0.0, e, 0.0), fw, uFlS.x, 0);
+          vec3 t = normalize(cross(normal, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
+          normal = normalize(normal + (t * gx + cross(normal, t) * gy) * uFlRelief);
+        }`);
+  };
+  const key = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => (key ? key.call(material) : '') + '-floradetail1';
+  return material;
+}

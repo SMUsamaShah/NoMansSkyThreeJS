@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { hash3i, hashFloat } from './rng.js';
-import { applyWindSway, GROW } from './shaders.js';
+import { applyWindSway, GROW, applyFloraDetail } from './shaders.js';
 import { chainAerial } from './scattering.js';
 import { buildFlora } from './flora.js';
 
@@ -203,6 +203,9 @@ export class Scatter {
         emissive: colors[kind].clone().multiplyScalar(glow),
       });
       applyWindSway(mat, SWAY[kind] || 0);   // 0 sway still wires the grow scale
+      // stone gets it too, at a tighter scale: an untextured boulder is the
+      // same flat-plastic problem as an untextured canopy
+      applyFloraDetail(mat, { fine: 9.0, coarse: 2.4, amount: 0.42, relief: 2.2 });
       chainAerial(mat);
       this.addMesh(planet, kind, GEO[kind], mat);
     }
@@ -223,6 +226,8 @@ export class Scatter {
       mat.emissive.setScalar(FLORA_GLOW[kind]);
       applyWindSway(mat, SWAY[kind] || 0);
       floraEmissive(mat);
+      // grass blades are ~5 cm wide: detail at leaf-clump scale would be noise
+      if (kind !== 'grass') applyFloraDetail(mat, { amount: 0.26 });
       chainAerial(mat);
       const im = this.addMesh(planet, kind, this.flora[kind], mat);
       if (kind === 'grass') im.castShadow = false;   // invisible; halves its cost

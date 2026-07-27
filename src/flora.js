@@ -204,7 +204,29 @@ function buildTree(rng, pal, canopyColor, noise, style) {
     }
     // flare the underside lip outward so the rim is not a knife edge
     prof[1].x = Math.max(prof[1].x, r * 0.62);
-    const cap = new THREE.LatheGeometry(prof, 18);
+    const cap = new THREE.LatheGeometry(prof, 26);
+    // Break the outline. A lathe is perfectly circular, and a perfectly
+    // circular dome is the single most toy-like shape there is — nothing
+    // grown is that regular. Displace radially by seeded noise in (angle,
+    // height) so the rim scallops and the profile ripples. Displacement is a
+    // pure function of those two, so the duplicated seam column moves with
+    // its twin and the surface cannot tear.
+    {
+      const cp = cap.attributes.position;
+      const oa = rng() * 30, ob = rng() * 30;
+      for (let i = 0; i < cp.count; i++) {
+        const x = cp.getX(i), y = cp.getY(i), z = cp.getZ(i);
+        const rad = Math.hypot(x, z);
+        if (rad < 1e-4) continue;
+        const ang = Math.atan2(z, x);
+        const n = noise.fbm(Math.cos(ang) + oa, Math.sin(ang) + oa, y / ch * 1.7 + ob,
+          1.9, 3, 0.55, 2.2, 1e9);
+        // 0.3 across 18 segments put a 20-degree hard point at every lobe —
+        // crumpled paper, not a canopy. Gentler, over more segments.
+        const k = 1 + n * 0.15 * (0.35 + 0.65 * (rad / r));   // rim moves most
+        cp.setXYZ(i, (x / rad) * rad * k, y, (z / rad) * rad * k);
+      }
+    }
     paint(cap, canopyColor, rng, 0.1);
     // darken the shaded underside — a cap lit flat top and bottom reads as a
     // decal, and the gill side is the part a viewer at eye height actually sees
@@ -364,13 +386,18 @@ export function floraPalette(planet, rng) {
   const shift = planet.type === 'exotic' ? 0.15 + rng() * 0.5
     : planet.type === 'toxic' ? 0.1 + rng() * 0.3
       : rng() < 0.4 ? 0.06 + rng() * 0.24 : (rng() - 0.5) * 0.08;
-  const canopy = base.clone().offsetHSL(shift, 0.18, 0.06);
-  const canopy2 = canopy.clone().offsetHSL(0.3 + rng() * 0.35, 0.05, (rng() - 0.5) * 0.1);
+  // Saturation used to go UP by 0.18 here, which is most of why the flora read
+  // as candy rather than as plants. Nothing in reference/star-citizen or
+  // reference/elite-dangerous is this saturated: natural foliage is muted and
+  // sits in a narrow value band. Alien hue drift stays — alien colour is a
+  // requirement (§2.4) — but the chroma comes down and the value goes down.
+  const canopy = base.clone().offsetHSL(shift, -0.09, 0.02);
+  const canopy2 = canopy.clone().offsetHSL(0.3 + rng() * 0.35, -0.03, (rng() - 0.4) * 0.08);
   // a third species: two trees per world meant every stand was a duet, and at
   // any distance where the silhouette is all you read, a duet is a monoculture
-  const canopy3 = canopy.clone().offsetHSL(0.14 + rng() * 0.22, -0.06, (rng() - 0.4) * 0.16);
+  const canopy3 = canopy.clone().offsetHSL(0.14 + rng() * 0.22, -0.10, (rng() - 0.3) * 0.11);
   const trunk = (planet.pal.rock || base).clone()
-    .lerp(new THREE.Color(0.24, 0.15, 0.1), 0.45 + rng() * 0.3);
+    .lerp(new THREE.Color(0.34, 0.24, 0.17), 0.4 + rng() * 0.25);
   const accent = new THREE.Color().setHSL(rng(), 0.85, 0.58);
   return { canopy, canopy2, canopy3, trunk, accent };
 }
@@ -399,7 +426,7 @@ export function buildFlora(planet) {
     grass: buildGrassTuft(rng),
     // meadows lean toward the planet's canopy colour instead of bare dirt —
     // the ground tint alone made grass vanish on dark soils
-    grassTint: pal.canopy.clone().offsetHSL(0, 0.12, 0.14),
+    grassTint: pal.canopy.clone().offsetHSL(0, 0.02, 0.10),
     // horizon-range proxies for the far tier
     far0: buildFarTree(rng, pal, t0.style, t0.h, pal.canopy),
     far1: buildFarTree(rng, pal, t1.style, t1.h, pal.canopy2),
